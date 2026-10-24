@@ -10,3 +10,19 @@ export const pool = new pg.Pool({
 });
 
 export const query = (text, params) => pool.query(text, params);
+
+/** Выполняет fn(client) в одной транзакции: COMMIT при успехе, ROLLBACK при ошибке. */
+export async function tx(fn) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    const res = await fn(client);
+    await client.query('COMMIT');
+    return res;
+  } catch (err) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw err;
+  } finally {
+    client.release();
+  }
+}

@@ -33,9 +33,10 @@
     <div class="top-actions">
       <div class="month" role="group" aria-label="Месяц">
         <button class="iconbtn" id="prevM" aria-label="Предыдущий месяц">‹</button>
-        <span id="monthLabel">—</span>
+        <span class="mlbl"><span id="monthLabel">—</span><small id="periodLabel" hidden></small></span>
         <button class="iconbtn" id="nextM" aria-label="Следующий месяц">›</button>
       </div>
+      <button class="btn ghost small" id="impOpen" type="button">Импорт CSV</button>
       <a class="btn ghost small" id="csvLink" href="#">Скачать CSV</a>
       <button class="btn ghost small" id="logout" type="button" hidden>Выйти</button>
     </div>
@@ -43,12 +44,42 @@
 
   <div id="banner" class="banner warn" hidden></div>
 
+  <section class="panel" id="importPanel" aria-labelledby="impH" hidden>
+    <div class="panel-h"><h2 id="impH">Импорт из CSV-выписки</h2><span class="meta" id="impMeta">Revolut, Bank of Cyprus или любой CSV</span></div>
+    <div class="add">
+      <div class="row">
+        <label class="f grow" for="impFile">Файл выписки<input id="impFile" type="file" accept=".csv,text/csv,text/plain"></label>
+        <label class="f" for="impAcc">Счёт<select id="impAcc"></select></label>
+      </div>
+      <div id="impMap" hidden>
+        <div class="row">
+          <label class="f" for="mDate">Дата<select id="mDate"></select></label>
+          <label class="f grow" for="mDesc">Описание<select id="mDesc"></select></label>
+          <label class="f" for="mAmt">Сумма (±)<select id="mAmt"></select></label>
+          <label class="f" for="mDebit">Или списание<select id="mDebit"></select></label>
+        </div>
+        <label class="check" id="mNegWrap"><input type="checkbox" id="mNeg"> Расходы записаны со знаком минус</label>
+      </div>
+      <div class="imp-tools" id="impTools" hidden>
+        <span class="hint" id="impSummary"></span>
+        <label class="check" id="impHiddenWrap"><input type="checkbox" id="impShowHidden"> Показать скрытые</label>
+        <button type="button" class="op" id="impAll">Отметить все</button>
+        <button type="button" class="op" id="impNone">Снять все</button>
+      </div>
+    </div>
+    <div class="imp-list" id="impList"></div>
+    <div class="actions imp-actions"><span class="hint" id="impHint"></span>
+      <button type="button" class="btn ghost" id="impCancel">Закрыть</button>
+      <button type="button" class="btn" id="impSubmit" disabled>Импортировать</button></div>
+  </section>
+
   <section class="summary" aria-label="Итоги месяца">
     <div class="tile"><div class="eyebrow"><span class="dot d-mand"></span>Обязательные</div><div class="val" id="tMand">—</div><div class="sub" id="tMandSub">в месяц</div></div>
     <div class="tile"><div class="eyebrow"><span class="dot d-subs"></span>Подписки</div><div class="val" id="tSubs">—</div><div class="sub" id="tSubsSub">в месяц</div></div>
     <div class="tile"><div class="eyebrow"><span class="dot d-var"></span>Расходы за месяц</div><div class="val" id="tVar">—</div><div class="sub" id="tVarSub">—</div></div>
     <div class="tile rest"><div class="eyebrow">Остаток</div><div class="val" id="tRest">—</div>
-      <label class="income sub" for="income">Доход в месяц <input id="income" class="num" inputmode="decimal" placeholder="0"></label></div>
+      <label class="income sub" for="income">Доход в месяц <input id="income" class="num" inputmode="decimal" placeholder="0"></label>
+      <label class="income sub" for="pstart">Месяц с <input id="pstart" class="num" inputmode="numeric" maxlength="2" placeholder="1"> числа</label></div>
   </section>
 
   <section class="load" aria-label="Структура трат">

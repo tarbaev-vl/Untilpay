@@ -10,6 +10,7 @@ import auth from './auth.js';
 import recurring from './routes/recurring.js';
 import expenses from './routes/expenses.js';
 import settings from './routes/settings.js';
+import importRoutes from './routes/import.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -38,6 +39,7 @@ export async function build(opts = {}) {
   await app.register(recurring);
   await app.register(expenses);
   await app.register(settings);
+  await app.register(importRoutes);
 
   app.get('/api/health', async () => {
     await pool.query('SELECT 1');

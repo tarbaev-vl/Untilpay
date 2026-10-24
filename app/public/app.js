@@ -1,3 +1,6 @@
+import { parseCsv, detectFormat, guessMapping, toTransactions, hasNegatives } from '/csv.js';
+import { periodRange, periodOf, rangeLabel } from '/period.js';
+
 const CATS = ['Жильё', 'Коммунальные', 'Связь и интернет', 'Продукты', 'Кафе и рестораны', 'Транспорт', 'Авто', 'Здоровье', 'Страховка', 'Кредиты', 'Подписки и сервисы', 'Образование', 'Дети', 'Одежда', 'Дом', 'Развлечения', 'Спорт', 'Путешествия', 'Подарки', 'Другое'];
 const ACCS = ['Bank of Cyprus', 'Revolut', 'Наличные', 'Другое'];
 const PERIOD = { month: { k: 1, t: 'в месяц' }, year: { k: 1 / 12, t: 'в год' }, quarter: { k: 1 / 3, t: 'в квартал' }, week: { k: 52 / 12, t: 'в неделю' } };
@@ -15,7 +18,7 @@ const monthly = (r) => (r.amount || 0) * (PERIOD[r.period] || PERIOD.month).k;
 const monthLabel = (m) => { const [y, mm] = m.split('-'); return `${MONTHS[+mm - 1]} ${y}`; };
 const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; };
 
-const S = { rec: [], exp: [], income: 0, month: monthOf(today()), editRec: null, editExp: null, kind: 'mandatory', loaded: false };
+const S = { rec: [], exp: [], income: 0, periodStart: 1, month: monthOf(today()), editRec: null, editExp: null, kind: 'mandatory', loaded: false };
 
 /* ---------- API ---------- */
 class ApiError extends Error { constructor(status, body) { super(body?.message || `HTTP ${status}`); this.status = status; this.body = body; } }
@@ -39,10 +42,15 @@ async function write(fn, msg) {
 
 /* ---------- загрузка ---------- */
 async function loadRec() { S.rec = await api('GET', '/api/recurring'); }
-async function loadExp() { S.exp = await api('GET', `/api/expenses?month=${S.month}`); }
-async function loadSettings() { S.income = (await api('GET', '/api/settings')).income || 0; }
+const periodQs = () => { const r = periodRange(S.month, S.periodStart); return `from=${r.from}&to=${r.to}`; };
+async function loadExp() { S.exp = await api('GET', `/api/expenses?${periodQs()}`); }
+async function loadSettings() { const st = await api('GET', '/api/settings'); S.income = st.income || 0; S.periodStart = st.periodStart || 1; }
 async function loadAll() {
-  try { await Promise.all([loadRec(), loadExp(), loadSettings()]); S.loaded = true; $('banner').hidden = true; }
+  try {
+    await loadSettings();
+    if (!S.loaded) S.month = periodOf(today(), S.periodStart); // период зависит от дня начала месяца
+    await Promise.all([loadRec(), loadExp()]); S.loaded = true; $('banner').hidden = true;
+  }
   catch (err) { if (err.status !== 401) { const b = $('banner'); b.hidden = false; b.textContent = 'Не удалось загрузить данные с сервера. Проверьте, что контейнеры запущены.'; } }
   render();
 }
@@ -64,7 +72,8 @@ function setKind(v) {
 /* ---------- render ---------- */
 function render() {
   $('monthLabel').textContent = monthLabel(S.month);
-  $('csvLink').href = `/api/expenses.csv?month=${S.month}`;
+  $('periodLabel').hidden = S.periodStart <= 1; $('periodLabel').textContent = rangeLabel(S.month, S.periodStart);
+  $('csvLink').href = `/api/expenses.csv?${periodQs()}`;
   const active = S.rec.filter((r) => r.active !== false);
   const mand = active.filter((r) => r.kind !== 'subscription').reduce((s, r) => s + monthly(r), 0);
   const subs = active.filter((r) => r.kind === 'subscription').reduce((s, r) => s + monthly(r), 0);
@@ -76,6 +85,7 @@ function render() {
   $('tSubs').textContent = fmt(subs); $('tSubsSub').textContent = `в месяц · ${eur0.format(subs * 12)} в год`;
   $('tVar').textContent = fmt(vari); $('tVarSub').textContent = `${exp.length} ${plural(exp.length, 'запись', 'записи', 'записей')}`;
   if (document.activeElement !== $('income')) $('income').value = S.income ? String(S.income).replace('.', ',') : '';
+  if (document.activeElement !== $('pstart')) $('pstart').value = String(S.periodStart);
   $('tRest').textContent = fmt((S.income || 0) - total);
 
   const base = Math.max(S.income || 0, total) || 1;
@@ -161,7 +171,8 @@ function renderExp(exp, total) {
       const del = el('button', 'op', 'Удал.'); del.type = 'button';
       del.onclick = () => confirmBtn(del, () => write(async () => { await api('DELETE', `/api/expenses/${e.id}`); await loadExp(); render(); }, 'Удалено'));
       ops.append(ed, del); it.appendChild(ops);
-      it.appendChild(el('div', 'det', [e.note ? e.category : null, e.account].filter(Boolean).join(' · ')));
+      const orig = e.original && e.original !== e.note ? `из выписки: ${e.original}` : null;
+      it.appendChild(el('div', 'det', [e.note ? e.category : null, e.account, orig].filter(Boolean).join(' · ')));
       L.appendChild(it);
     });
   });
@@ -216,7 +227,7 @@ $('expForm').addEventListener('submit', async (e) => {
   const ed = S.editExp;
   const ok = await write(async () => {
     if (ed) await api('PUT', `/api/expenses/${ed.id}`, body); else await api('POST', '/api/expenses', body);
-    S.month = monthOf(date); await loadExp(); render();
+    S.month = periodOf(date, S.periodStart); await loadExp(); render();
   }, ed ? 'Сохранено' : 'Расход добавлен');
   if (ok) { resetExp(); $('eAmt').focus(); }
 });
@@ -233,6 +244,20 @@ async function saveIncome() {
 $('income').addEventListener('input', () => { clearTimeout(incT); incT = setTimeout(saveIncome, 700); });
 $('income').addEventListener('blur', saveIncome);
 
+/* ---------- начало бюджетного месяца ---------- */
+async function savePeriodStart() {
+  const v = parseInt($('pstart').value, 10);
+  if (!(v >= 1 && v <= 31)) { $('pstart').value = String(S.periodStart); return; }
+  if (v === S.periodStart) return;
+  await write(async () => {
+    await api('PUT', '/api/settings', { periodStart: v });
+    S.periodStart = v; S.month = periodOf(today(), v);
+    await loadExp(); render();
+  }, `Месяц начинается ${v}-го`);
+}
+$('pstart').addEventListener('change', savePeriodStart);
+$('pstart').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('pstart').blur(); });
+
 /* ---------- месяцы ---------- */
 async function shiftMonth(d) {
   const [y, m] = S.month.split('-').map(Number); const dt = new Date(y, m - 1 + d, 1);
@@ -243,6 +268,133 @@ async function shiftMonth(d) {
 $('prevM').onclick = () => shiftMonth(-1);
 $('nextM').onclick = () => shiftMonth(1);
 
+/* ---------- импорт CSV ---------- */
+const FORMAT_ACC = { revolut: 'Revolut', boc: 'Bank of Cyprus' };
+const IMP = { table: null, format: null, items: [], dropped: null, showHidden: false, seq: 0 };
+const visibleImport = () => IMP.items.filter((i) => i.status === 'new' || (i.status === 'skipped' && IMP.showHidden));
+
+function openImport() { $('importPanel').hidden = false; $('impFile').focus(); }
+function closeImport() {
+  $('importPanel').hidden = true; $('impFile').value = ''; $('impShowHidden').checked = false; $('impHint').textContent = '';
+  Object.assign(IMP, { table: null, format: null, items: [], dropped: null, showHidden: false }); IMP.seq++;
+  $('impMap').hidden = true; $('impMeta').textContent = 'Revolut, Bank of Cyprus или любой CSV'; renderImport();
+}
+function fillCols(sel, headers, val, optional) {
+  sel.innerHTML = '';
+  if (optional) { const o = el('option', null, '—'); o.value = '-1'; sel.appendChild(o); }
+  headers.forEach((h, i) => { const o = el('option', null, h || `Колонка ${i + 1}`); o.value = String(i); sel.appendChild(o); });
+  sel.value = String(val < 0 && !optional ? 0 : val);
+}
+const colMap = () => ({ date: +$('mDate').value, desc: +$('mDesc').value, amount: +$('mAmt').value, debit: +$('mDebit').value, negSign: $('mNeg').checked });
+
+async function previewImport() {
+  const seq = ++IMP.seq; const m = colMap();
+  $('mNegWrap').hidden = !(m.debit < 0 && m.amount >= 0);
+  const { rows, dropped } = toTransactions(IMP.table, IMP.format, m);
+  let items = []; $('impHint').textContent = '';
+  if (rows.length) {
+    try { items = await api('POST', '/api/import/preview', { account: $('impAcc').value, rows }); }
+    catch (err) { if (err.status !== 401 && seq === IMP.seq) $('impHint').textContent = err.message || 'Не удалось проверить выписку'; }
+  }
+  if (seq !== IMP.seq) return; // пришёл ответ на устаревший запрос
+  IMP.dropped = dropped;
+  IMP.items = items.map((r) => ({ ...r, category: CATS.includes(r.category) ? r.category : 'Другое', checked: r.status === 'new' }))
+    .sort((a, b) => (b.datetime || b.date).localeCompare(a.datetime || a.date));
+  $('impMeta').textContent = `Формат: ${{ revolut: 'Revolut', boc: 'Bank of Cyprus' }[IMP.format] || 'свой — проверьте колонки'}`;
+  renderImport();
+}
+
+function importRow(it) {
+  const r = el('div', `imp-row${it.checked ? '' : ' off'}`);
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = it.checked; cb.setAttribute('aria-label', 'Импортировать');
+  const dt = el('div', 'd num', new Date(`${it.date}T12:00:00`).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }));
+  const nm = el('input', 'fld nm'); nm.value = it.note; nm.maxLength = 500; nm.setAttribute('aria-label', 'Название');
+  const cat = el('select', 'fld cat'); fillSelect(cat, CATS, it.category); cat.setAttribute('aria-label', 'Категория');
+  const amt = el('div', 'amt', fmt(it.amount));
+  const orig = el('div', 'orig'); const origT = el('span');
+  if (it.status === 'skipped') orig.appendChild(el('span', 'chip', 'скрыта'));
+  orig.appendChild(origT);
+  const showOrig = () => {
+    origT.textContent = it.note.trim() !== it.original ? `из выписки: ${it.original}` : '';
+    orig.hidden = !origT.textContent && it.status !== 'skipped';
+  };
+  cb.onchange = () => { it.checked = cb.checked; r.classList.toggle('off', !cb.checked); updateImportBtn(); };
+  nm.oninput = () => { it.note = nm.value; showOrig(); };
+  cat.onchange = () => { it.category = cat.value; };
+  showOrig(); r.append(cb, dt, nm, cat, amt, orig);
+  return r;
+}
+
+function renderImport() {
+  const L = $('impList'); L.innerHTML = '';
+  const its = IMP.items; const cnt = (st) => its.filter((i) => i.status === st).length;
+  const nNew = cnt('new'), nImp = cnt('imported'), nHid = cnt('skipped'), d = IMP.dropped || {};
+  $('impTools').hidden = !IMP.table;
+  const parts = [`новых ${nNew}`];
+  [[nImp, 'уже импортировано'], [nHid, 'скрыто'], [d.income, 'поступлений пропущено'], [d.pending, 'в обработке'], [d.currency, 'не в EUR'],
+    [d.cancelled, 'отменённых'], [d.other, 'копилки'], [d.bad, 'не распознано']].forEach(([n, t]) => { if (n) parts.push(`${t} ${n}`); });
+  $('impSummary').textContent = parts.join(' · ');
+  $('impHiddenWrap').hidden = !nHid;
+  const vis = visibleImport();
+  if (IMP.table && !vis.length) {
+    L.appendChild(el('div', 'empty', its.length ? 'Новых транзакций нет: всё из этого файла уже импортировано или скрыто.'
+      : `Расходов в файле не нашлось.${IMP.format === 'revolut' ? '' : ' Проверьте, какие колонки выбраны.'}`));
+  }
+  vis.forEach((it) => L.appendChild(importRow(it)));
+  updateImportBtn();
+}
+
+function updateImportBtn() {
+  const vis = visibleImport();
+  const k = vis.filter((i) => i.checked).length, s = vis.filter((i) => !i.checked && i.status === 'new').length;
+  $('impSubmit').disabled = !(k + s);
+  const t = []; if (k) t.push(`Импортировать ${k}`); if (s) t.push(`${k ? 'скрыть' : 'Скрыть'} ${s}`);
+  $('impSubmit').textContent = t.join(' · ') || 'Импортировать';
+}
+
+$('impOpen').onclick = () => ($('importPanel').hidden ? openImport() : closeImport());
+$('impCancel').onclick = closeImport;
+$('impFile').addEventListener('change', async () => {
+  const f = $('impFile').files[0]; if (!f) return;
+  const table = parseCsv(await f.text());
+  if (!table.rows.length) { closeImport(); openImport(); $('impHint').textContent = 'В файле не нашлось строк с данными'; return; }
+  IMP.table = table; IMP.format = detectFormat(table.headers);
+  if (FORMAT_ACC[IMP.format]) $('impAcc').value = FORMAT_ACC[IMP.format];
+  $('impMap').hidden = IMP.format === 'revolut';
+  if (IMP.format !== 'revolut') {
+    const g = guessMapping(table.headers);
+    fillCols($('mDate'), table.headers, g.date); fillCols($('mDesc'), table.headers, g.desc, true);
+    fillCols($('mAmt'), table.headers, g.amount, true); fillCols($('mDebit'), table.headers, g.debit, true);
+    $('mNeg').checked = hasNegatives(table.rows, g.amount);
+  }
+  await previewImport();
+});
+// сумма со знаком и отдельная колонка списаний — взаимоисключающие
+$('mAmt').addEventListener('change', () => { if (+$('mAmt').value >= 0) { $('mDebit').value = '-1'; $('mNeg').checked = hasNegatives(IMP.table.rows, +$('mAmt').value); } });
+$('mDebit').addEventListener('change', () => { if (+$('mDebit').value >= 0) $('mAmt').value = '-1'; });
+['mDate', 'mDesc', 'mAmt', 'mDebit', 'mNeg', 'impAcc'].forEach((id) => $(id).addEventListener('change', () => { if (IMP.table) previewImport(); }));
+$('impShowHidden').onchange = () => { IMP.showHidden = $('impShowHidden').checked; renderImport(); };
+const markAll = (v) => { visibleImport().forEach((i) => { i.checked = v; }); renderImport(); };
+$('impAll').onclick = () => markAll(true);
+$('impNone').onclick = () => markAll(false);
+$('impSubmit').onclick = async () => {
+  const items = visibleImport().filter((i) => i.checked || i.status === 'new').map((i) => ({
+    date: i.date, datetime: i.datetime, amount: i.amount, original: i.original, n: i.n,
+    action: i.checked ? 'import' : 'skip', note: i.note.trim(), category: i.category,
+  }));
+  if (!items.length) return;
+  $('impSubmit').disabled = true;
+  let res;
+  const ok = await write(async () => {
+    res = await api('POST', '/api/import/commit', { account: $('impAcc').value, items });
+    // если в текущем месяце ничего не добавилось — показываем последний месяц из импорта
+    const months = items.filter((i) => i.action === 'import').map((i) => periodOf(i.date, S.periodStart)).sort();
+    if (months.length && !months.includes(S.month)) S.month = months.at(-1);
+    await loadExp(); render();
+  });
+  if (ok) { toast(`Импортировано ${res.imported}${res.skipped ? `, скрыто ${res.skipped}` : ''}`); closeImport(); } else updateImportBtn();
+};
+
 /* ---------- вход ---------- */
 function showLogin() { $('appView').hidden = true; $('loginView').hidden = false; $('pw').focus(); }
 function showApp(passwordRequired) { $('loginView').hidden = true; $('appView').hidden = false; $('logout').hidden = !passwordRequired; }
@@ -251,11 +403,11 @@ $('loginForm').addEventListener('submit', async (e) => {
   try { await api('POST', '/api/login', { password: $('pw').value }); $('pw').value = ''; showApp(true); loadAll(); }
   catch (err) { $('loginErr').textContent = err.message || 'Не удалось войти'; }
 });
-$('logout').onclick = async () => { await api('POST', '/api/logout').catch(() => {}); S.rec = []; S.exp = []; S.loaded = false; showLogin(); };
+$('logout').onclick = async () => { await api('POST', '/api/logout').catch(() => {}); S.rec = []; S.exp = []; S.loaded = false; closeImport(); showLogin(); };
 
 /* ---------- старт ---------- */
 fillSelect($('rCat'), CATS, 'Жильё'); fillSelect($('eCat'), CATS, 'Продукты');
-fillSelect($('rAcc'), ACCS, 'Bank of Cyprus'); fillSelect($('eAcc'), ACCS, 'Revolut');
+fillSelect($('rAcc'), ACCS, 'Bank of Cyprus'); fillSelect($('eAcc'), ACCS, 'Revolut'); fillSelect($('impAcc'), ACCS, 'Revolut');
 $('eDate').value = today();
 (async () => {
   try {

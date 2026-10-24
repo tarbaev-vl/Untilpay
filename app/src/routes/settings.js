@@ -5,14 +5,17 @@ export default async function settings(app) {
 
   app.get('/api/settings', async () => {
     const { rows } = await query(`SELECT value FROM settings WHERE key='main'`);
-    return { income: 0, ...(rows[0]?.value || {}) };
+    return { income: 0, periodStart: 1, ...(rows[0]?.value || {}) };
   });
 
   app.put('/api/settings', {
     schema: {
       body: {
         type: 'object', additionalProperties: false,
-        properties: { income: { type: 'number', minimum: 0, maximum: 1e9 } },
+        properties: {
+          income: { type: 'number', minimum: 0, maximum: 1e9 },
+          periodStart: { type: 'integer', minimum: 1, maximum: 31 }, // бюджетный месяц начинается с этого числа
+        },
       },
     },
   }, async (req) => {
@@ -22,6 +25,6 @@ export default async function settings(app) {
        RETURNING value`,
       [JSON.stringify(req.body)],
     );
-    return { income: 0, ...rows[0].value };
+    return { income: 0, periodStart: 1, ...rows[0].value };
   });
 }

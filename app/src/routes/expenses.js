@@ -13,13 +13,26 @@ const body = {
   },
 };
 const idParam = { type: 'object', properties: { id: { type: 'string', pattern: '^[0-9]+$' } } };
-const monthQs = {
+// Календарный месяц (?month=2026-10) или произвольный период (?from=2026-10-25&to=2026-11-25, to не входит)
+const periodQs = {
   type: 'object',
-  required: ['month'],
-  properties: { month: { type: 'string', pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' } },
+  properties: {
+    month: { type: 'string', pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' },
+    from: { type: 'string', format: 'date' },
+    to: { type: 'string', format: 'date' },
+  },
+  anyOf: [{ required: ['month'] }, { required: ['from', 'to'] }],
 };
 const cols = 'id::text, amount, category, spent_on AS date, note, account, created_at, updated_at';
-const range = (m) => [`${m}-01`, `${m}-01`]; // $1 = начало, конец = +1 месяц в SQL
+const pad = (n) => String(n).padStart(2, '0');
+const isoDay = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
+/** [начало, конец (не входит)] */
+const range = (q) => {
+  if (q.from && q.to) return [q.from, q.to];
+  const [y, m] = q.month.split('-').map(Number);
+  return [`${q.month}-01`, isoDay(new Date(Date.UTC(y, m, 1)))];
+};
+const prevDay = (s) => { const d = new Date(`${s}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return isoDay(d); };
 
 const csvCell = (v) => {
   const s = String(v ?? '');
@@ -31,29 +44,34 @@ const csvCell = (v) => {
 export default async function expenses(app) {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/expenses', { schema: { querystring: monthQs } }, async (req) => {
+  app.get('/api/expenses', { schema: { querystring: periodQs } }, async (req) => {
+    // original — описание из CSV-выписки, если расход импортирован
     const { rows } = await query(
-      `SELECT ${cols} FROM expenses
-       WHERE spent_on >= $1::date AND spent_on < ($2::date + interval '1 month')
-       ORDER BY spent_on DESC, id DESC`,
-      range(req.query.month),
+      `SELECT e.id::text, e.amount, e.category, e.spent_on AS date, e.note, e.account, e.created_at, e.updated_at,
+         t.original
+       FROM expenses e LEFT JOIN import_tx t ON t.expense_id = e.id
+       WHERE e.spent_on >= $1::date AND e.spent_on < $2::date
+       ORDER BY e.spent_on DESC, e.id DESC`,
+      range(req.query),
     );
     return rows;
   });
 
   // Выгрузка месяца в CSV (открывается в Excel / Numbers / Google Sheets)
-  app.get('/api/expenses.csv', { schema: { querystring: monthQs } }, async (req, reply) => {
+  app.get('/api/expenses.csv', { schema: { querystring: periodQs } }, async (req, reply) => {
     const { rows } = await query(
       `SELECT spent_on AS date, amount, category, note, account FROM expenses
-       WHERE spent_on >= $1::date AND spent_on < ($2::date + interval '1 month')
+       WHERE spent_on >= $1::date AND spent_on < $2::date
        ORDER BY spent_on, id`,
-      range(req.query.month),
+      range(req.query),
     );
+    const [from, to] = range(req.query);
+    const name = req.query.from ? `${from}_${prevDay(to)}` : req.query.month;
     const lines = [['Дата', 'Сумма', 'Категория', 'Комментарий', 'Счёт'].join(';')];
     for (const r of rows) lines.push([r.date, r.amount.toFixed(2).replace('.', ','), r.category, r.note, r.account].map(csvCell).join(';'));
     reply
       .header('Content-Type', 'text/csv; charset=utf-8')
-      .header('Content-Disposition', `attachment; filename="expenses-${req.query.month}.csv"`);
+      .header('Content-Disposition', `attachment; filename="expenses-${name}.csv"`);
     return '﻿' + lines.join('\r\n') + '\r\n';
   });
 

@@ -2,7 +2,9 @@
 
 Учёт регулярных платежей (аренда, коммуналка, страховки, подписки) и ежедневных расходов.
 Годовые и квартальные платежи пересчитываются в месячную сумму, есть разбивка по категориям,
-остаток от дохода и выгрузка месяца в CSV.
+остаток от дохода, выгрузка месяца в CSV и импорт банковских CSV-выписок.
+Месяц может начинаться с любого числа (например, со дня зарплаты): при старте 25-го
+«Ноябрь» — это 25 октября – 24 ноября. Настраивается в плитке «Остаток».
 
 **Стек:** Node.js 22 + Fastify 5 · PostgreSQL 16 · nginx · Docker Compose.
 
@@ -68,12 +70,27 @@ gunzip -c backup-2026-10-23.sql.gz | docker compose exec -T db psql -U budget bu
 | PUT | `/api/recurring/:id` | изменить целиком |
 | PATCH | `/api/recurring/:id` | `{ "active": false }` — пауза |
 | DELETE | `/api/recurring/:id` | удалить |
-| GET | `/api/expenses?month=2026-10` | расходы за месяц |
-| GET | `/api/expenses.csv?month=2026-10` | то же в CSV (разделитель `;`, открывается в Excel) |
+| GET | `/api/expenses?month=2026-10` | расходы за календарный месяц; или `?from=2026-10-25&to=2026-11-25` — за период (`to` не входит) |
+| GET | `/api/expenses.csv?month=…` / `?from=…&to=…` | то же в CSV (разделитель `;`, открывается в Excel) |
 | POST | `/api/expenses` | создать: `amount, date (YYYY-MM-DD), category, note, account` |
 | PUT | `/api/expenses/:id` | изменить |
 | DELETE | `/api/expenses/:id` | удалить |
-| GET / PUT | `/api/settings` | `{ "income": 3200 }` — доход в месяц |
+| GET / PUT | `/api/settings` | `{ "income": 3200, "periodStart": 25 }` — доход в месяц и число, с которого начинается бюджетный месяц |
+| POST | `/api/import/preview` | `{ account, rows: [{ date, datetime, amount, original }] }` → строки со статусом `new / imported / skipped` и подсказкой названия и категории из правил |
+| POST | `/api/import/commit` | `{ account, items: [{ …строка, n, action: import/skip, note, category }] }` → `{ imported, skipped }` |
+
+## Импорт CSV
+
+Кнопка «Импорт CSV» в шапке. Revolut и Bank of Cyprus определяются по заголовкам. Для другого
+CSV нужно выбрать колонки даты, описания и суммы (или списаний). Импортируются только списания:
+поступления, операции в обработке и операции не в EUR пропускаются.
+
+- Отмеченные строки становятся расходами, неотмеченные запоминаются как скрытые и больше
+  не показываются. Вернуть скрытую можно галочкой «Показать скрытые».
+- Транзакция узнаётся по отпечатку исходных данных выписки (счёт, дата/время, сумма, описание),
+  поэтому при повторной загрузке не дублируется, даже если её переименовали или удалили расход.
+- Если поменять название или категорию, это запомнится как правило для того же описания из банка
+  (без цифр: номеров карт и ссылок на платёж) и подставится при следующих импортах.
 
 ## Структура
 
@@ -85,10 +102,12 @@ app/
   Dockerfile
   package.json
   migrations/001_init.sql  таблицы recurring, expenses, settings
+  migrations/002_import.sql  import_tx (виденные транзакции выписок), import_rules (переименования)
   src/server.js            Fastify, запуск миграций
   src/auth.js              вход по паролю, подписанная кука
   src/routes/*.js          REST API с валидацией JSON Schema
   public/                  интерфейс (HTML + CSS + JS без сборки)
+  public/csv.js            разбор CSV-выписок (Revolut, BoC, ручной режим)
 ```
 
 ## Разработка без Docker
@@ -103,6 +122,5 @@ SESSION_SECRET=$(openssl rand -hex 32) APP_PASSWORD=dev npm run dev
 
 ## Идеи на потом
 
-- Импорт CSV-выписок Revolut и Bank of Cyprus.
 - Автосинхронизация с банками через Enable Banking (PSD2) по расписанию.
 - Графики по месяцам, лимиты по категориям.
