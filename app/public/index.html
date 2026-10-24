@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#0B6E7C">
+<title>Семейный бюджет</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<!-- Вход -->
+<div class="login" id="loginView" hidden>
+  <form id="loginForm">
+    <div>
+      <div class="eyebrow">Бюджет · EUR</div>
+      <h1>Семейный бюджет</h1>
+    </div>
+    <label class="f" for="pw">Пароль<input id="pw" type="password" autocomplete="current-password" required></label>
+    <div class="err" id="loginErr" role="alert"></div>
+    <button class="btn" type="submit">Войти</button>
+  </form>
+</div>
+
+<div class="wrap" id="appView" hidden>
+  <header class="top">
+    <div>
+      <div class="eyebrow">Бюджет · EUR</div>
+      <h1>Семейный бюджет</h1>
+    </div>
+    <div class="top-actions">
+      <div class="month" role="group" aria-label="Месяц">
+        <button class="iconbtn" id="prevM" aria-label="Предыдущий месяц">‹</button>
+        <span id="monthLabel">—</span>
+        <button class="iconbtn" id="nextM" aria-label="Следующий месяц">›</button>
+      </div>
+      <a class="btn ghost small" id="csvLink" href="#">Скачать CSV</a>
+      <button class="btn ghost small" id="logout" type="button" hidden>Выйти</button>
+    </div>
+  </header>
+
+  <div id="banner" class="banner warn" hidden></div>
+
+  <section class="summary" aria-label="Итоги месяца">
+    <div class="tile"><div class="eyebrow"><span class="dot d-mand"></span>Обязательные</div><div class="val" id="tMand">—</div><div class="sub" id="tMandSub">в месяц</div></div>
+    <div class="tile"><div class="eyebrow"><span class="dot d-subs"></span>Подписки</div><div class="val" id="tSubs">—</div><div class="sub" id="tSubsSub">в месяц</div></div>
+    <div class="tile"><div class="eyebrow"><span class="dot d-var"></span>Расходы за месяц</div><div class="val" id="tVar">—</div><div class="sub" id="tVarSub">—</div></div>
+    <div class="tile rest"><div class="eyebrow">Остаток</div><div class="val" id="tRest">—</div>
+      <label class="income sub" for="income">Доход в месяц <input id="income" class="num" inputmode="decimal" placeholder="0"></label></div>
+  </section>
+
+  <section class="load" aria-label="Структура трат">
+    <div class="eyebrow">Куда уходят деньги в этом месяце</div>
+    <div class="stack" id="stack"></div>
+    <div class="legend" id="legend"></div>
+  </section>
+
+  <div class="cols">
+    <section class="panel" aria-labelledby="recH">
+      <div class="panel-h"><h2 id="recH">Регулярные платежи</h2><span class="meta" id="recMeta"></span></div>
+      <form class="add" id="recForm" autocomplete="off">
+        <div class="row">
+          <label class="f grow" for="rName">Название<input id="rName" required maxlength="200" placeholder="Netflix, аренда, страховка…"></label>
+          <label class="f amt" for="rAmt">Сумма, €<input id="rAmt" class="num" required inputmode="decimal" placeholder="0,00"></label>
+          <label class="f" for="rPeriod">Как часто<select id="rPeriod">
+            <option value="month">Каждый месяц</option><option value="year">Раз в год</option>
+            <option value="quarter">Раз в квартал</option><option value="week">Каждую неделю</option></select></label>
+        </div>
+        <div class="row">
+          <div class="f fgroup">Тип
+            <div class="seg" id="rKind" role="group" aria-label="Тип платежа">
+              <button type="button" data-v="mandatory" aria-pressed="true">Обязательный</button>
+              <button type="button" data-v="subscription" aria-pressed="false">Подписка</button>
+            </div></div>
+          <label class="f" for="rCat">Категория<select id="rCat"></select></label>
+          <label class="f" for="rAcc">Счёт<select id="rAcc"></select></label>
+          <label class="f amt" for="rDay">День списания<input id="rDay" class="num" inputmode="numeric" placeholder="1–31"></label>
+        </div>
+        <div class="actions"><span class="hint" id="rHint"></span>
+          <button type="button" class="btn ghost" id="rCancel" hidden>Отмена</button>
+          <button class="btn" id="rSubmit">Добавить платёж</button></div>
+      </form>
+      <div class="list" id="recList"></div>
+    </section>
+
+    <section class="panel" aria-labelledby="expH">
+      <div class="panel-h"><h2 id="expH">Расходы</h2><span class="meta" id="expMeta"></span></div>
+      <form class="add" id="expForm" autocomplete="off">
+        <div class="row">
+          <label class="f amt" for="eAmt">Сумма, €<input id="eAmt" class="num" required inputmode="decimal" placeholder="0,00"></label>
+          <label class="f" for="eCat">Категория<select id="eCat"></select></label>
+          <label class="f" for="eDate">Дата<input id="eDate" type="date" required></label>
+        </div>
+        <div class="row">
+          <label class="f grow" for="eNote">Комментарий<input id="eNote" maxlength="500" placeholder="Alphamega, бензин, аптека…"></label>
+          <label class="f" for="eAcc">Счёт<select id="eAcc"></select></label>
+        </div>
+        <div class="actions"><span class="hint" id="eHint"></span>
+          <button type="button" class="btn ghost" id="eCancel" hidden>Отмена</button>
+          <button class="btn" id="eSubmit">Добавить расход</button></div>
+      </form>
+      <div class="subhead"><span class="eyebrow">По категориям, вместе с регулярными</span></div>
+      <div class="cats" id="cats"></div>
+      <div class="list" id="expList"></div>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast" hidden role="status"></div>
+<script src="/app.js" type="module"></script>
+</body>
+</html>

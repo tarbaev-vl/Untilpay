@@ -1,0 +1,266 @@
+const CATS = ['Жильё', 'Коммунальные', 'Связь и интернет', 'Продукты', 'Кафе и рестораны', 'Транспорт', 'Авто', 'Здоровье', 'Страховка', 'Кредиты', 'Подписки и сервисы', 'Образование', 'Дети', 'Одежда', 'Дом', 'Развлечения', 'Спорт', 'Путешествия', 'Подарки', 'Другое'];
+const ACCS = ['Bank of Cyprus', 'Revolut', 'Наличные', 'Другое'];
+const PERIOD = { month: { k: 1, t: 'в месяц' }, year: { k: 1 / 12, t: 'в год' }, quarter: { k: 1 / 3, t: 'в квартал' }, week: { k: 52 / 12, t: 'в неделю' } };
+const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+
+const $ = (id) => document.getElementById(id);
+const eur = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const eur0 = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const fmt = (n) => eur.format(Math.round((n || 0) * 100) / 100);
+const parseAmt = (s) => { const v = parseFloat(String(s).replace(/\s/g, '').replace(',', '.')); return Number.isFinite(v) ? Math.round(v * 100) / 100 : NaN; };
+const pad = (n) => String(n).padStart(2, '0');
+const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const monthOf = (s) => s.slice(0, 7);
+const monthly = (r) => (r.amount || 0) * (PERIOD[r.period] || PERIOD.month).k;
+const monthLabel = (m) => { const [y, mm] = m.split('-'); return `${MONTHS[+mm - 1]} ${y}`; };
+const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; };
+
+const S = { rec: [], exp: [], income: 0, month: monthOf(today()), editRec: null, editExp: null, kind: 'mandatory', loaded: false };
+
+/* ---------- API ---------- */
+class ApiError extends Error { constructor(status, body) { super(body?.message || `HTTP ${status}`); this.status = status; this.body = body; } }
+async function api(method, url, body) {
+  const res = await fetch(url, {
+    method,
+    headers: body ? { 'Content-Type': 'application/json' } : {},
+    body: body ? JSON.stringify(body) : undefined,
+    credentials: 'same-origin',
+  });
+  if (res.status === 401 && url !== '/api/login') { showLogin(); throw new ApiError(401, { message: 'Нужно войти' }); }
+  if (res.status === 204) return null;
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, data);
+  return data;
+}
+async function write(fn, msg) {
+  try { await fn(); if (msg) toast(msg); return true; }
+  catch (err) { if (err.status !== 401) toast(err.message || 'Не сохранилось. Проверьте связь.'); return false; }
+}
+
+/* ---------- загрузка ---------- */
+async function loadRec() { S.rec = await api('GET', '/api/recurring'); }
+async function loadExp() { S.exp = await api('GET', `/api/expenses?month=${S.month}`); }
+async function loadSettings() { S.income = (await api('GET', '/api/settings')).income || 0; }
+async function loadAll() {
+  try { await Promise.all([loadRec(), loadExp(), loadSettings()]); S.loaded = true; $('banner').hidden = true; }
+  catch (err) { if (err.status !== 401) { const b = $('banner'); b.hidden = false; b.textContent = 'Не удалось загрузить данные с сервера. Проверьте, что контейнеры запущены.'; } }
+  render();
+}
+
+/* ---------- UI helpers ---------- */
+function fillSelect(sel, arr, val) { sel.innerHTML = ''; arr.forEach((a) => { const o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o); }); if (val) sel.value = val; }
+function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
+function toast(t) { const e = $('toast'); e.textContent = t; e.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { e.hidden = true; }, 2400); }
+function confirmBtn(btn, fn) {
+  if (btn.dataset.armed) { fn(); return; }
+  btn.dataset.armed = '1'; const old = btn.textContent; btn.textContent = 'Точно?'; btn.classList.add('danger');
+  setTimeout(() => { delete btn.dataset.armed; btn.textContent = old; btn.classList.remove('danger'); }, 3000);
+}
+function setKind(v) {
+  S.kind = v; [...$('rKind').children].forEach((b) => b.setAttribute('aria-pressed', String(b.dataset.v === v)));
+  if (v === 'subscription' && $('rCat').value === 'Жильё') $('rCat').value = 'Подписки и сервисы';
+}
+
+/* ---------- render ---------- */
+function render() {
+  $('monthLabel').textContent = monthLabel(S.month);
+  $('csvLink').href = `/api/expenses.csv?month=${S.month}`;
+  const active = S.rec.filter((r) => r.active !== false);
+  const mand = active.filter((r) => r.kind !== 'subscription').reduce((s, r) => s + monthly(r), 0);
+  const subs = active.filter((r) => r.kind === 'subscription').reduce((s, r) => s + monthly(r), 0);
+  const exp = S.exp;
+  const vari = exp.reduce((s, e) => s + (e.amount || 0), 0);
+  const total = mand + subs + vari;
+
+  $('tMand').textContent = fmt(mand); $('tMandSub').textContent = `в месяц · ${eur0.format(mand * 12)} в год`;
+  $('tSubs').textContent = fmt(subs); $('tSubsSub').textContent = `в месяц · ${eur0.format(subs * 12)} в год`;
+  $('tVar').textContent = fmt(vari); $('tVarSub').textContent = `${exp.length} ${plural(exp.length, 'запись', 'записи', 'записей')}`;
+  if (document.activeElement !== $('income')) $('income').value = S.income ? String(S.income).replace('.', ',') : '';
+  $('tRest').textContent = fmt((S.income || 0) - total);
+
+  const base = Math.max(S.income || 0, total) || 1;
+  const parts = [['Обязательные', mand, 'var(--mand)'], ['Подписки', subs, 'var(--subs)'], ['Расходы', vari, 'var(--var)']];
+  $('stack').innerHTML = '';
+  parts.forEach(([n, v, c]) => { const i = el('i'); i.style.width = `${(v / base) * 100}%`; i.style.background = c; i.title = `${n}: ${fmt(v)}`; $('stack').appendChild(i); });
+  $('legend').innerHTML = '';
+  parts.forEach(([n, v, c]) => {
+    const s = el('span'); const sw = el('span', 'sw'); sw.style.background = c; s.appendChild(sw);
+    s.append(`${n} `); s.appendChild(el('b', 'num', fmt(v))); if (total) s.append(` · ${Math.round((v / total) * 100)}%`);
+    $('legend').appendChild(s);
+  });
+  if (S.income) { const s = el('span'); s.append('Доход '); s.appendChild(el('b', 'num', fmt(S.income))); s.append(` · занято ${Math.round((total / S.income) * 100)}%`); $('legend').appendChild(s); }
+
+  renderRec(active.length);
+  renderCats(active, exp);
+  renderExp(exp, vari);
+}
+
+function renderRec(nActive) {
+  const L = $('recList'); L.innerHTML = '';
+  $('recMeta').textContent = `${nActive} ${plural(nActive, 'активный', 'активных', 'активных')}`;
+  if (!S.rec.length) { L.appendChild(el('div', 'empty', S.loaded ? 'Добавьте аренду, коммуналку, страховку, подписки. Годовые платежи пересчитаются в месячную сумму.' : 'Загрузка…')); return; }
+  [['mandatory', 'Обязательные', 'var(--mand)'], ['subscription', 'Подписки', 'var(--subs)']].forEach(([k, title, color]) => {
+    const items = S.rec.filter((r) => (r.kind === 'subscription' ? 'subscription' : 'mandatory') === k)
+      .sort((a, b) => (b.active !== false) - (a.active !== false) || monthly(b) - monthly(a));
+    if (!items.length) return;
+    const sum = items.filter((r) => r.active !== false).reduce((s, r) => s + monthly(r), 0);
+    const gh = el('div', 'group-h'); gh.append(el('span', null, title), el('span', 'num', `${fmt(sum)} / мес`)); L.appendChild(gh);
+    items.forEach((r) => {
+      const it = el('div', `item${r.active === false ? ' off' : ''}`);
+      const bar = el('span', 'bar'); bar.style.background = color; it.appendChild(bar);
+      const nm = el('div', 'name', r.name); if (r.active === false) nm.appendChild(el('span', 'chip', 'на паузе')); it.appendChild(nm);
+      const a = el('div', 'amt', fmt(r.amount));
+      a.appendChild(el('small', null, r.period !== 'month' ? `${PERIOD[r.period].t} · ${fmt(monthly(r))}/мес` : 'в месяц'));
+      it.appendChild(a);
+      const ops = el('div', 'ops');
+      const e = el('button', 'op', 'Изм.'); e.type = 'button'; e.onclick = () => editRec(r);
+      const p = el('button', 'op', r.active === false ? 'Вкл.' : 'Пауза'); p.type = 'button';
+      p.onclick = () => write(async () => { await api('PATCH', `/api/recurring/${r.id}`, { active: r.active === false }); await loadRec(); render(); });
+      const d = el('button', 'op', 'Удал.'); d.type = 'button';
+      d.onclick = () => confirmBtn(d, () => write(async () => { await api('DELETE', `/api/recurring/${r.id}`); await loadRec(); render(); }, 'Удалено'));
+      ops.append(e, p, d); it.appendChild(ops);
+      const det = [r.category, r.account]; if (r.day) det.push(`списание ${r.day}-го`);
+      it.appendChild(el('div', 'det', det.filter(Boolean).join(' · ')));
+      L.appendChild(it);
+    });
+  });
+}
+
+function renderCats(active, exp) {
+  const C = $('cats'); C.innerHTML = ''; const m = {};
+  active.forEach((r) => { const c = r.category || 'Другое'; (m[c] = m[c] || { f: 0, v: 0 }).f += monthly(r); });
+  exp.forEach((e) => { const c = e.category || 'Другое'; (m[c] = m[c] || { f: 0, v: 0 }).v += e.amount || 0; });
+  const rows = Object.entries(m).map(([k, v]) => [k, v.f, v.v, v.f + v.v]).sort((a, b) => b[3] - a[3]);
+  if (!rows.length) { C.appendChild(el('div', 'empty', 'Здесь появится разбивка по категориям.')); return; }
+  const max = rows[0][3] || 1;
+  rows.forEach(([k, f, v, t]) => {
+    const r = el('div', 'cat'); r.appendChild(el('span', 'lbl', k));
+    const tr = el('div', 'track');
+    const a = el('i'); a.style.width = `${(f / max) * 100}%`; a.style.background = 'var(--mand)'; a.title = `Регулярные: ${fmt(f)}`;
+    const b = el('i'); b.style.width = `${(v / max) * 100}%`; b.style.background = 'var(--var)'; b.title = `Расходы: ${fmt(v)}`;
+    tr.append(a, b); r.appendChild(tr); r.appendChild(el('span', 'v', fmt(t))); C.appendChild(r);
+  });
+}
+
+function renderExp(exp, total) {
+  const L = $('expList'); L.innerHTML = '';
+  $('expMeta').textContent = `${monthLabel(S.month)} · ${fmt(total)}`;
+  if (!exp.length) { L.appendChild(el('div', 'empty', S.loaded ? `За ${monthLabel(S.month).toLowerCase()} расходов пока нет. Внесите первую трату в форму выше.` : 'Загрузка…')); return; }
+  const by = {}; exp.forEach((e) => (by[e.date] = by[e.date] || []).push(e));
+  Object.keys(by).sort().reverse().forEach((d) => {
+    const items = by[d]; const sum = items.reduce((s, e) => s + (e.amount || 0), 0);
+    const gh = el('div', 'group-h');
+    gh.append(el('span', null, new Date(`${d}T12:00:00`).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })), el('span', 'num', fmt(sum)));
+    L.appendChild(gh);
+    items.forEach((e) => {
+      const it = el('div', 'item'); const bar = el('span', 'bar'); bar.style.background = 'var(--var)'; it.appendChild(bar);
+      it.appendChild(el('div', 'name', e.note || e.category));
+      it.appendChild(el('div', 'amt', fmt(e.amount)));
+      const ops = el('div', 'ops');
+      const ed = el('button', 'op', 'Изм.'); ed.type = 'button'; ed.onclick = () => editExp(e);
+      const del = el('button', 'op', 'Удал.'); del.type = 'button';
+      del.onclick = () => confirmBtn(del, () => write(async () => { await api('DELETE', `/api/expenses/${e.id}`); await loadExp(); render(); }, 'Удалено'));
+      ops.append(ed, del); it.appendChild(ops);
+      it.appendChild(el('div', 'det', [e.note ? e.category : null, e.account].filter(Boolean).join(' · ')));
+      L.appendChild(it);
+    });
+  });
+}
+
+/* ---------- регулярные платежи ---------- */
+function resetRec() {
+  S.editRec = null; $('recForm').reset(); setKind('mandatory'); $('rCat').value = 'Жильё'; $('rAcc').value = 'Bank of Cyprus';
+  $('rSubmit').textContent = 'Добавить платёж'; $('rCancel').hidden = true; $('rHint').textContent = '';
+}
+function editRec(r) {
+  S.editRec = r; $('rName').value = r.name; $('rAmt').value = String(r.amount).replace('.', ','); $('rPeriod').value = r.period || 'month';
+  setKind(r.kind || 'mandatory'); $('rCat').value = r.category || 'Другое'; $('rAcc').value = r.account || 'Другое'; $('rDay').value = r.day || '';
+  $('rSubmit').textContent = 'Сохранить'; $('rCancel').hidden = false; $('rHint').textContent = `Редактирование: ${r.name}`; $('rName').focus();
+}
+$('rCancel').onclick = resetRec;
+$('rKind').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setKind(b.dataset.v); });
+$('recForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const amount = parseAmt($('rAmt').value);
+  if (!(amount > 0)) { $('rHint').textContent = 'Введите сумму больше нуля, например 12,99'; $('rAmt').focus(); return; }
+  const name = $('rName').value.trim(); if (!name) { $('rName').focus(); return; }
+  const day = parseInt($('rDay').value, 10);
+  const body = { name, amount, period: $('rPeriod').value, kind: S.kind, category: $('rCat').value, account: $('rAcc').value, day: day >= 1 && day <= 31 ? day : null };
+  const ed = S.editRec;
+  const ok = await write(async () => {
+    if (ed) await api('PUT', `/api/recurring/${ed.id}`, { ...body, active: ed.active !== false });
+    else await api('POST', '/api/recurring', { ...body, active: true });
+    await loadRec(); render();
+  }, ed ? 'Сохранено' : 'Платёж добавлен');
+  if (ok) resetRec();
+});
+
+/* ---------- расходы ---------- */
+function resetExp() {
+  S.editExp = null; const keepDate = $('eDate').value, keepAcc = $('eAcc').value; $('expForm').reset();
+  $('eDate').value = keepDate || today(); $('eAcc').value = keepAcc; $('eCat').value = 'Продукты';
+  $('eSubmit').textContent = 'Добавить расход'; $('eCancel').hidden = true; $('eHint').textContent = '';
+}
+function editExp(x) {
+  S.editExp = x; $('eAmt').value = String(x.amount).replace('.', ','); $('eCat').value = x.category || 'Другое'; $('eDate').value = x.date;
+  $('eNote').value = x.note || ''; $('eAcc').value = x.account || 'Другое';
+  $('eSubmit').textContent = 'Сохранить'; $('eCancel').hidden = false; $('eHint').textContent = 'Редактирование расхода'; $('eAmt').focus();
+}
+$('eCancel').onclick = resetExp;
+$('expForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const amount = parseAmt($('eAmt').value);
+  if (!(amount > 0)) { $('eHint').textContent = 'Введите сумму больше нуля, например 23,40'; $('eAmt').focus(); return; }
+  const date = $('eDate').value || today();
+  const body = { amount, category: $('eCat').value, date, note: $('eNote').value.trim(), account: $('eAcc').value };
+  const ed = S.editExp;
+  const ok = await write(async () => {
+    if (ed) await api('PUT', `/api/expenses/${ed.id}`, body); else await api('POST', '/api/expenses', body);
+    S.month = monthOf(date); await loadExp(); render();
+  }, ed ? 'Сохранено' : 'Расход добавлен');
+  if (ok) { resetExp(); $('eAmt').focus(); }
+});
+
+/* ---------- доход ---------- */
+let incT;
+async function saveIncome() {
+  clearTimeout(incT);
+  const raw = $('income').value.trim(); const v = raw ? parseAmt(raw) : 0;
+  if (!(v >= 0) || v === S.income) return;
+  S.income = v; render();
+  await write(() => api('PUT', '/api/settings', { income: v }));
+}
+$('income').addEventListener('input', () => { clearTimeout(incT); incT = setTimeout(saveIncome, 700); });
+$('income').addEventListener('blur', saveIncome);
+
+/* ---------- месяцы ---------- */
+async function shiftMonth(d) {
+  const [y, m] = S.month.split('-').map(Number); const dt = new Date(y, m - 1 + d, 1);
+  S.month = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`; render();
+  try { await loadExp(); } catch { /* 401 уже обработан */ }
+  render();
+}
+$('prevM').onclick = () => shiftMonth(-1);
+$('nextM').onclick = () => shiftMonth(1);
+
+/* ---------- вход ---------- */
+function showLogin() { $('appView').hidden = true; $('loginView').hidden = false; $('pw').focus(); }
+function showApp(passwordRequired) { $('loginView').hidden = true; $('appView').hidden = false; $('logout').hidden = !passwordRequired; }
+$('loginForm').addEventListener('submit', async (e) => {
+  e.preventDefault(); $('loginErr').textContent = '';
+  try { await api('POST', '/api/login', { password: $('pw').value }); $('pw').value = ''; showApp(true); loadAll(); }
+  catch (err) { $('loginErr').textContent = err.message || 'Не удалось войти'; }
+});
+$('logout').onclick = async () => { await api('POST', '/api/logout').catch(() => {}); S.rec = []; S.exp = []; S.loaded = false; showLogin(); };
+
+/* ---------- старт ---------- */
+fillSelect($('rCat'), CATS, 'Жильё'); fillSelect($('eCat'), CATS, 'Продукты');
+fillSelect($('rAcc'), ACCS, 'Bank of Cyprus'); fillSelect($('eAcc'), ACCS, 'Revolut');
+$('eDate').value = today();
+(async () => {
+  try {
+    const me = await api('GET', '/api/me');
+    if (!me.authed) { showLogin(); return; }
+    showApp(me.passwordRequired); render(); loadAll();
+  } catch { showApp(false); const b = $('banner'); b.hidden = false; b.textContent = 'Сервер недоступен.'; }
+})();
