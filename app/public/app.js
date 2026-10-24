@@ -18,7 +18,7 @@ const monthly = (r) => (r.amount || 0) * (PERIOD[r.period] || PERIOD.month).k;
 const monthLabel = (m) => { const [y, mm] = m.split('-'); return `${MONTHS[+mm - 1]} ${y}`; };
 const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; };
 
-const S = { rec: [], exp: [], income: 0, periodStart: 1, month: monthOf(today()), editRec: null, editExp: null, kind: 'mandatory', loaded: false };
+const S = { rec: [], exp: [], income: 0, periodStart: 1, cat: null, month: monthOf(today()), editRec: null, editExp: null, kind: 'mandatory', loaded: false };
 
 /* ---------- API ---------- */
 class ApiError extends Error { constructor(status, body) { super(body?.message || `HTTP ${status}`); this.status = status; this.body = body; } }
@@ -102,7 +102,10 @@ function render() {
 
   renderRec(active.length);
   renderCats(active, exp);
-  renderExp(exp, vari);
+  // фильтр по категории действует только на список расходов, итоги считаются по всем
+  const shown = S.cat ? exp.filter((e) => (e.category || 'Другое') === S.cat) : exp;
+  $('catReset').hidden = !S.cat;
+  renderExp(shown, shown.reduce((s, e) => s + (e.amount || 0), 0), vari);
 }
 
 function renderRec(nActive) {
@@ -137,14 +140,17 @@ function renderRec(nActive) {
 }
 
 function renderCats(active, exp) {
-  const C = $('cats'); C.innerHTML = ''; const m = {};
+  const C = $('cats'); C.innerHTML = ''; C.classList.toggle('filtered', Boolean(S.cat)); const m = {};
   active.forEach((r) => { const c = r.category || 'Другое'; (m[c] = m[c] || { f: 0, v: 0 }).f += monthly(r); });
   exp.forEach((e) => { const c = e.category || 'Другое'; (m[c] = m[c] || { f: 0, v: 0 }).v += e.amount || 0; });
   const rows = Object.entries(m).map(([k, v]) => [k, v.f, v.v, v.f + v.v]).sort((a, b) => b[3] - a[3]);
   if (!rows.length) { C.appendChild(el('div', 'empty', 'Здесь появится разбивка по категориям.')); return; }
   const max = rows[0][3] || 1;
   rows.forEach(([k, f, v, t]) => {
-    const r = el('div', 'cat'); r.appendChild(el('span', 'lbl', k));
+    const r = el('button', `cat${S.cat === k ? ' on' : ''}`); r.type = 'button'; r.setAttribute('aria-pressed', String(S.cat === k));
+    r.title = S.cat === k ? 'Показать все расходы' : `Показать только «${k}»`;
+    r.onclick = () => { S.cat = S.cat === k ? null : k; render(); };
+    r.appendChild(el('span', 'lbl', k));
     const tr = el('div', 'track');
     const a = el('i'); a.style.width = `${(f / max) * 100}%`; a.style.background = 'var(--mand)'; a.title = `Регулярные: ${fmt(f)}`;
     const b = el('i'); b.style.width = `${(v / max) * 100}%`; b.style.background = 'var(--var)'; b.title = `Расходы: ${fmt(v)}`;
@@ -152,10 +158,14 @@ function renderCats(active, exp) {
   });
 }
 
-function renderExp(exp, total) {
+function renderExp(exp, total, all) {
   const L = $('expList'); L.innerHTML = '';
-  $('expMeta').textContent = `${monthLabel(S.month)} · ${fmt(total)}`;
-  if (!exp.length) { L.appendChild(el('div', 'empty', S.loaded ? `За ${monthLabel(S.month).toLowerCase()} расходов пока нет. Внесите первую трату в форму выше.` : 'Загрузка…')); return; }
+  $('expMeta').textContent = S.cat ? `«${S.cat}» · ${fmt(total)} из ${fmt(all)}` : `${monthLabel(S.month)} · ${fmt(total)}`;
+  if (!exp.length) {
+    const msg = S.cat ? `В категории «${S.cat}» за ${monthLabel(S.month).toLowerCase()} расходов нет.`
+      : `За ${monthLabel(S.month).toLowerCase()} расходов пока нет. Внесите первую трату в форму выше.`;
+    L.appendChild(el('div', 'empty', S.loaded ? msg : 'Загрузка…')); return;
+  }
   const by = {}; exp.forEach((e) => (by[e.date] = by[e.date] || []).push(e));
   Object.keys(by).sort().reverse().forEach((d) => {
     const items = by[d]; const sum = items.reduce((s, e) => s + (e.amount || 0), 0);
@@ -265,6 +275,7 @@ async function shiftMonth(d) {
   try { await loadExp(); } catch { /* 401 уже обработан */ }
   render();
 }
+$('catReset').onclick = () => { S.cat = null; render(); };
 $('prevM').onclick = () => shiftMonth(-1);
 $('nextM').onclick = () => shiftMonth(1);
 
@@ -309,7 +320,7 @@ function importRow(it) {
   const cb = el('input'); cb.type = 'checkbox'; cb.checked = it.checked; cb.setAttribute('aria-label', 'Импортировать');
   const dt = el('div', 'd num', new Date(`${it.date}T12:00:00`).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }));
   const nm = el('input', 'fld nm'); nm.value = it.note; nm.maxLength = 500; nm.setAttribute('aria-label', 'Название');
-  const cat = el('select', 'fld cat'); fillSelect(cat, CATS, it.category); cat.setAttribute('aria-label', 'Категория');
+  const cat = el('select', 'fld icat'); fillSelect(cat, CATS, it.category); cat.setAttribute('aria-label', 'Категория');
   const amt = el('div', 'amt', fmt(it.amount));
   const orig = el('div', 'orig'); const origT = el('span');
   if (it.status === 'skipped') orig.appendChild(el('span', 'chip', 'скрыта'));
@@ -403,7 +414,7 @@ $('loginForm').addEventListener('submit', async (e) => {
   try { await api('POST', '/api/login', { password: $('pw').value }); $('pw').value = ''; showApp(true); loadAll(); }
   catch (err) { $('loginErr').textContent = err.message || 'Не удалось войти'; }
 });
-$('logout').onclick = async () => { await api('POST', '/api/logout').catch(() => {}); S.rec = []; S.exp = []; S.loaded = false; closeImport(); showLogin(); };
+$('logout').onclick = async () => { await api('POST', '/api/logout').catch(() => {}); S.rec = []; S.exp = []; S.cat = null; S.loaded = false; closeImport(); showLogin(); };
 
 /* ---------- старт ---------- */
 fillSelect($('rCat'), CATS, 'Жильё'); fillSelect($('eCat'), CATS, 'Продукты');
