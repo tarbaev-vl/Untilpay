@@ -27,6 +27,8 @@ export async function build(opts = {}) {
   // Понятные ошибки для фронтенда (до регистрации маршрутов, чтобы плагины его унаследовали)
   app.setErrorHandler((err, req, reply) => {
     if (err.validation) return reply.code(400).send({ error: 'invalid', message: 'Проверьте поля формы', details: err.message });
+    // нарушение внешнего ключа: единственная ссылка, которую присылает клиент, — recurring_id
+    if (err.code === '23503') return reply.code(400).send({ error: 'invalid', message: 'Регулярный платёж не найден' });
     if (err.statusCode === 429) return reply.code(429).send({ error: 'rate_limited', message: 'Слишком много попыток, подождите минуту' });
     req.log.error(err);
     return reply.code(err.statusCode && err.statusCode < 500 ? err.statusCode : 500)

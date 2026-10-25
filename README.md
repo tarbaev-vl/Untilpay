@@ -72,12 +72,25 @@ gunzip -c backup-2026-10-23.sql.gz | docker compose exec -T db psql -U budget bu
 | DELETE | `/api/recurring/:id` | удалить |
 | GET | `/api/expenses?month=2026-10` | расходы за календарный месяц; или `?from=2026-10-25&to=2026-11-25` — за период (`to` не входит) |
 | GET | `/api/expenses.csv?month=…` / `?from=…&to=…` | то же в CSV (разделитель `;`, открывается в Excel) |
-| POST | `/api/expenses` | создать: `amount, date (YYYY-MM-DD), category, note, account` |
+| POST | `/api/expenses` | создать: `amount, date (YYYY-MM-DD), category, note, account, recurring_id` (id регулярного платежа или `null`) |
 | PUT | `/api/expenses/:id` | изменить |
 | DELETE | `/api/expenses/:id` | удалить |
 | GET / PUT | `/api/settings` | `{ "income": 3200, "periodStart": 25 }` — доход в месяц и число, с которого начинается бюджетный месяц |
 | POST | `/api/import/preview` | `{ account, rows: [{ date, datetime, amount, original }] }` → строки со статусом `new / imported / skipped` и подсказкой названия и категории из правил |
 | POST | `/api/import/commit` | `{ account, items: [{ …строка, n, action: import/skip, note, category }] }` → `{ imported, skipped }` |
+
+## Регулярные платежи и фактические оплаты
+
+Расход можно связать с регулярным платежом (поле «Регулярный платёж» в форме или в строке импорта).
+Такой расход не входит в «Расходы за месяц», а закрывает платёж, поэтому ничего не считается дважды.
+
+- **Ежемесячный платёж:** в периоде учитывается фактически оплаченная сумма. Пока оплаты нет,
+  учитывается план, а у платежа написано «ещё не списан».
+- **Годовой, квартальный, еженедельный:** в итогах остаётся месячная доля по плану, чтобы годовая
+  страховка не задвоилась в месяц оплаты. Связанный расход только отмечает платёж как оплаченный.
+- **Импорт CSV:** связь подставляется сама, если совпали сумма и слово из названия
+  (Netflix 15,99 ↔ «NETFLIX.COM 4421»). Выбор запоминается в правиле вместе с названием и категорией.
+- Если удалить регулярный платёж, связанные с ним расходы станут обычными.
 
 ## Импорт CSV
 
@@ -103,6 +116,7 @@ app/
   package.json
   migrations/001_init.sql  таблицы recurring, expenses, settings
   migrations/002_import.sql  import_tx (виденные транзакции выписок), import_rules (переименования)
+  migrations/003_recurring_link.sql  связь расходов и правил импорта с регулярными платежами
   src/server.js            Fastify, запуск миграций
   src/auth.js              вход по паролю, подписанная кука
   src/routes/*.js          REST API с валидацией JSON Schema

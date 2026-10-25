@@ -10,6 +10,8 @@ const body = {
     date: { type: 'string', format: 'date' },
     note: { type: 'string', maxLength: 500, default: '' },
     account: { type: 'string', maxLength: 100, default: 'Другое' },
+    // оплата регулярного платежа: такой расход закрывает платёж, а не входит в «Расходы»
+    recurring_id: { type: ['string', 'null'], pattern: '^[0-9]+$', default: null },
   },
 };
 const idParam = { type: 'object', properties: { id: { type: 'string', pattern: '^[0-9]+$' } } };
@@ -23,7 +25,7 @@ const periodQs = {
   },
   anyOf: [{ required: ['month'] }, { required: ['from', 'to'] }],
 };
-const cols = 'id::text, amount, category, spent_on AS date, note, account, created_at, updated_at';
+const cols = 'id::text, amount, category, spent_on AS date, note, account, recurring_id::text, created_at, updated_at';
 const pad = (n) => String(n).padStart(2, '0');
 const isoDay = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 /** [начало, конец (не входит)] */
@@ -47,7 +49,7 @@ export default async function expenses(app) {
   app.get('/api/expenses', { schema: { querystring: periodQs } }, async (req) => {
     // original — описание из CSV-выписки, если расход импортирован
     const { rows } = await query(
-      `SELECT e.id::text, e.amount, e.category, e.spent_on AS date, e.note, e.account, e.created_at, e.updated_at,
+      `SELECT e.id::text, e.amount, e.category, e.spent_on AS date, e.note, e.account, e.recurring_id::text, e.created_at, e.updated_at,
          t.original
        FROM expenses e LEFT JOIN import_tx t ON t.expense_id = e.id
        WHERE e.spent_on >= $1::date AND e.spent_on < $2::date
@@ -78,8 +80,8 @@ export default async function expenses(app) {
   app.post('/api/expenses', { schema: { body } }, async (req, reply) => {
     const b = req.body;
     const { rows } = await query(
-      `INSERT INTO expenses (amount, category, spent_on, note, account) VALUES ($1,$2,$3,$4,$5) RETURNING ${cols}`,
-      [b.amount, b.category, b.date, b.note.trim(), b.account],
+      `INSERT INTO expenses (amount, category, spent_on, note, account, recurring_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING ${cols}`,
+      [b.amount, b.category, b.date, b.note.trim(), b.account, b.recurring_id],
     );
     return reply.code(201).send(rows[0]);
   });
@@ -87,9 +89,9 @@ export default async function expenses(app) {
   app.put('/api/expenses/:id', { schema: { params: idParam, body } }, async (req, reply) => {
     const b = req.body;
     const { rows } = await query(
-      `UPDATE expenses SET amount=$1, category=$2, spent_on=$3, note=$4, account=$5, updated_at=now()
-       WHERE id=$6 RETURNING ${cols}`,
-      [b.amount, b.category, b.date, b.note.trim(), b.account, req.params.id],
+      `UPDATE expenses SET amount=$1, category=$2, spent_on=$3, note=$4, account=$5, recurring_id=$6, updated_at=now()
+       WHERE id=$7 RETURNING ${cols}`,
+      [b.amount, b.category, b.date, b.note.trim(), b.account, b.recurring_id, req.params.id],
     );
     if (!rows.length) return reply.code(404).send({ error: 'not_found', message: 'Расход не найден' });
     return rows[0];
