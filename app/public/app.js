@@ -1,5 +1,5 @@
 import { parseCsv, detectFormat, guessMapping, toTransactions, hasNegatives } from '/csv.js';
-import { periodRange, periodOf, rangeLabel } from '/period.js';
+import { periodRange, periodOf, rangeLabel, dueDate } from '/period.js';
 
 const CATS = ['Жильё', 'Коммунальные', 'Связь и интернет', 'Продукты', 'Кафе и рестораны', 'Транспорт', 'Авто', 'Здоровье', 'Страховка', 'Кредиты', 'Подписки и сервисы', 'Образование', 'Дети', 'Одежда', 'Дом', 'Развлечения', 'Спорт', 'Путешествия', 'Подарки', 'Другое'];
 const ACCS = ['Bank of Cyprus', 'Revolut', 'Наличные', 'Другое'];
@@ -43,7 +43,8 @@ async function write(fn, msg) {
 /* ---------- загрузка ---------- */
 async function loadRec() { S.rec = await api('GET', '/api/recurring'); }
 const periodQs = () => { const r = periodRange(S.month, S.periodStart); return `from=${r.from}&to=${r.to}`; };
-async function loadExp() { S.exp = await api('GET', `/api/expenses?${periodQs()}`); }
+// linked=1: сервер добавит оплаты регулярных платежей рядом с периодом — их могли внести заранее или с опозданием
+async function loadExp() { S.exp = await api('GET', `/api/expenses?${periodQs()}&linked=1`); }
 async function loadSettings() { const st = await api('GET', '/api/settings'); S.income = st.income || 0; S.periodStart = st.periodStart || 1; }
 async function loadAll() {
   try {
@@ -71,15 +72,24 @@ function setKind(v) {
 
 /* ---------- регулярные платежи и их оплаты ---------- */
 // Расход со ссылкой на регулярный платёж закрывает этот платёж и не входит в «Расходы»
+// Оплата засчитывается за ближайшую дату списания (или за месяц, выбранный вручную), а не за дату расхода
+const coverPeriod = (e, r) => periodOf(dueDate(e.date, r.day, e.for_month, r.period === 'month'), S.periodStart);
 function ledger() {
   const byId = new Map(S.rec.map((r) => [r.id, r]));
-  const paid = {}; const free = [];
-  S.exp.forEach((e) => { if (e.recurring_id && byId.has(e.recurring_id)) (paid[e.recurring_id] = paid[e.recurring_id] || []).push(e); else free.push(e); });
+  const { from, to } = periodRange(S.month, S.periodStart);
+  const paid = {}; const free = []; const listed = [];
+  const cover = (e) => { const r = e.recurring_id && byId.get(e.recurring_id); return r ? coverPeriod(e, r) : null; };
+  S.exp.forEach((e) => {
+    const inRange = e.date >= from && e.date < to; const c = cover(e);
+    if (c === S.month) (paid[e.recurring_id] = paid[e.recurring_id] || []).push(e);
+    else if (!c && inRange) free.push(e);
+    if (inRange || c === S.month) listed.push(e); // в списке: траты периода и оплаты, засчитанные за него
+  });
   const paidSum = (r) => (paid[r.id] || []).reduce((s, e) => s + (e.amount || 0), 0);
   // ежемесячный: факт заменяет план; годовой, квартальный, недельный — месячная доля по плану
   const effective = (r) => (r.period === 'month' && paid[r.id] ? paidSum(r) : monthly(r));
   const counted = S.rec.filter((r) => r.active !== false || paid[r.id]);
-  return { byId, paid, paidSum, free, effective, counted };
+  return { byId, paid, paidSum, free, listed, cover, effective, counted };
 }
 const shortDate = (d) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 function fillRecSelect(sel, val, none = '—') {
@@ -126,7 +136,7 @@ function render() {
   renderRec(active.length, L);
   renderCats(L.counted, exp, L.effective);
   // фильтр по категории действует только на список расходов, итоги считаются по всем
-  const shown = S.cat ? S.exp.filter((e) => (e.category || 'Другое') === S.cat) : S.exp;
+  const shown = S.cat ? L.listed.filter((e) => (e.category || 'Другое') === S.cat) : L.listed;
   $('catReset').hidden = !S.cat;
   renderExp(shown, L, vari);
 }
@@ -188,7 +198,7 @@ function renderExp(exp, led, all) {
   const L = $('expList'); L.innerHTML = '';
   const recOf = (e) => (e.recurring_id && led.byId.get(e.recurring_id)) || null;
   const sumOf = (arr) => arr.reduce((s, e) => s + (e.amount || 0), 0);
-  const total = sumOf(exp.filter((e) => !recOf(e))), linked = sumOf(exp.filter(recOf));
+  const total = sumOf(exp.filter((e) => !recOf(e))), linked = sumOf(exp.filter((e) => led.cover(e) === S.month));
   $('expMeta').textContent = (S.cat ? `«${S.cat}» · ${fmt(total)} из ${fmt(all)}` : `${monthLabel(S.month)} · ${fmt(total)}`)
     + (linked ? ` · регулярные ${fmt(linked)}` : '');
   if (!exp.length) {
@@ -214,7 +224,9 @@ function renderExp(exp, led, all) {
       del.onclick = () => confirmBtn(del, () => write(async () => { await api('DELETE', `/api/expenses/${e.id}`); await loadExp(); render(); }, 'Удалено'));
       ops.append(ed, del); it.appendChild(ops);
       const orig = e.original && e.original !== e.note ? `из выписки: ${e.original}` : null;
-      it.appendChild(el('div', 'det', [e.note ? e.category : null, e.account, rr ? `регулярный: ${rr.name}` : null, orig].filter(Boolean).join(' · ')));
+      const c = rr ? led.cover(e) : null;
+      const forLbl = c && c !== periodOf(e.date, S.periodStart) ? `за ${monthLabel(c).toLowerCase()}` : null;
+      it.appendChild(el('div', 'det', [e.note ? e.category : null, e.account, rr ? `регулярный: ${rr.name}` : null, forLbl, orig].filter(Boolean).join(' · ')));
       L.appendChild(it);
     });
   });
@@ -251,17 +263,36 @@ $('recForm').addEventListener('submit', async (e) => {
 /* ---------- расходы ---------- */
 function resetExp() {
   S.editExp = null; const keepDate = $('eDate').value, keepAcc = $('eAcc').value; $('expForm').reset();
-  $('eDate').value = keepDate || today(); $('eAcc').value = keepAcc; $('eCat').value = 'Продукты'; $('eRec').value = '';
+  $('eDate').value = keepDate || today(); $('eAcc').value = keepAcc; $('eCat').value = 'Продукты'; $('eRec').value = ''; fillForSelect('');
   $('eSubmit').textContent = 'Добавить расход'; $('eCancel').hidden = true; $('eHint').textContent = '';
 }
 function editExp(x) {
   S.editExp = x; $('eAmt').value = String(x.amount).replace('.', ','); $('eCat').value = x.category || 'Другое'; $('eDate').value = x.date;
-  $('eNote').value = x.note || ''; $('eAcc').value = x.account || 'Другое'; $('eRec').value = x.recurring_id || '';
+  $('eNote').value = x.note || ''; $('eAcc').value = x.account || 'Другое'; $('eRec').value = x.recurring_id || ''; fillForSelect(x.for_month);
   $('eSubmit').textContent = 'Сохранить'; $('eCancel').hidden = false; $('eHint').textContent = 'Редактирование расхода'; $('eAmt').focus();
 }
 $('eCancel').onclick = resetExp;
 // выбор регулярного платежа подставляет его категорию, счёт, а в пустые поля — название и сумму
+// «За месяц»: авто по ближайшей дате списания или вручную — прошлый, этот, следующий месяц от даты оплаты
+function fillForSelect(val) {
+  const r = S.rec.find((x) => x.id === $('eRec').value);
+  $('eForWrap').hidden = !r; if (!r) return;
+  const date = $('eDate').value || today();
+  const target = (fm) => periodOf(dueDate(date, r.day, fm, r.period === 'month'), S.periodStart);
+  const sel = $('eFor'); sel.innerHTML = '';
+  const add = (v, t) => { const o = el('option', null, t); o.value = v; sel.appendChild(o); };
+  add('', `Авто — ${monthLabel(target(null)).toLowerCase()}`);
+  const seen = new Set(); const [y, m] = date.split('-').map(Number);
+  [-1, 0, 1].forEach((k) => {
+    const dt = new Date(y, m - 1 + k, 1); const fm = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`;
+    const p = target(fm); if (seen.has(p)) return; seen.add(p); add(fm, `за ${monthLabel(p).toLowerCase()}`);
+  });
+  sel.value = val || '';
+  if (val && sel.value !== val) { add(val, `за ${monthLabel(target(val)).toLowerCase()}`); sel.value = val; }
+}
+$('eDate').addEventListener('change', () => fillForSelect($('eFor').value));
 $('eRec').addEventListener('change', () => {
+  fillForSelect($('eFor').value);
   const r = S.rec.find((x) => x.id === $('eRec').value); if (!r) return;
   if (CATS.includes(r.category)) $('eCat').value = r.category;
   if (ACCS.includes(r.account)) $('eAcc').value = r.account;
@@ -273,7 +304,8 @@ $('expForm').addEventListener('submit', async (e) => {
   const amount = parseAmt($('eAmt').value);
   if (!(amount > 0)) { $('eHint').textContent = 'Введите сумму больше нуля, например 23,40'; $('eAmt').focus(); return; }
   const date = $('eDate').value || today();
-  const body = { amount, category: $('eCat').value, date, note: $('eNote').value.trim(), account: $('eAcc').value, recurring_id: $('eRec').value || null };
+  const body = { amount, category: $('eCat').value, date, note: $('eNote').value.trim(), account: $('eAcc').value,
+    recurring_id: $('eRec').value || null, for_month: $('eRec').value ? ($('eFor').value || null) : null };
   const ed = S.editExp;
   const ok = await write(async () => {
     if (ed) await api('PUT', `/api/expenses/${ed.id}`, body); else await api('POST', '/api/expenses', body);

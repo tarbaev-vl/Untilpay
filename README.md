@@ -70,9 +70,9 @@ gunzip -c backup-2026-10-23.sql.gz | docker compose exec -T db psql -U budget bu
 | PUT | `/api/recurring/:id` | изменить целиком |
 | PATCH | `/api/recurring/:id` | `{ "active": false }` — пауза |
 | DELETE | `/api/recurring/:id` | удалить |
-| GET | `/api/expenses?month=2026-10` | расходы за календарный месяц; или `?from=2026-10-25&to=2026-11-25` — за период (`to` не входит) |
+| GET | `/api/expenses?month=2026-10` | расходы за календарный месяц; или `?from=2026-10-25&to=2026-11-25` — за период (`to` не входит); `&linked=1` — плюс оплаты регулярных платежей за ±62 дня вокруг периода |
 | GET | `/api/expenses.csv?month=…` / `?from=…&to=…` | то же в CSV (разделитель `;`, открывается в Excel) |
-| POST | `/api/expenses` | создать: `amount, date (YYYY-MM-DD), category, note, account, recurring_id` (id регулярного платежа или `null`) |
+| POST | `/api/expenses` | создать: `amount, date (YYYY-MM-DD), category, note, account, recurring_id` (id регулярного платежа или `null`), `for_month` (`YYYY-MM` — за какой месяц оплата, `null` = авто) |
 | PUT | `/api/expenses/:id` | изменить |
 | DELETE | `/api/expenses/:id` | удалить |
 | GET / PUT | `/api/settings` | `{ "income": 3200, "periodStart": 25 }` — доход в месяц и число, с которого начинается бюджетный месяц |
@@ -90,6 +90,11 @@ gunzip -c backup-2026-10-23.sql.gz | docker compose exec -T db psql -U budget bu
   страховка не задвоилась в месяц оплаты. Связанный расход только отмечает платёж как оплаченный.
 - **Импорт CSV:** связь подставляется сама, если совпали сумма и слово из названия
   (Netflix 15,99 ↔ «NETFLIX.COM 4421»). Выбор запоминается в правиле вместе с названием и категорией.
+- **За какой месяц оплата:** засчитывается за ближайшую дату списания по полю «День списания».
+  Аренда со списанием 1-го, оплаченная 27.09, — это оплата за 01.10, и она попадает в отчётный месяц,
+  куда входит 1 октября (с учётом «Месяц с N числа»). В сентябре такая оплата видна с пометкой
+  «за октябрь», но в итоги не входит. Если день списания не задан, месяц определяется по дате оплаты.
+  В форме расхода месяц можно выбрать вручную в поле «За месяц».
 - Если удалить регулярный платёж, связанные с ним расходы станут обычными.
 
 ## Импорт CSV
@@ -117,6 +122,7 @@ app/
   migrations/001_init.sql  таблицы recurring, expenses, settings
   migrations/002_import.sql  import_tx (виденные транзакции выписок), import_rules (переименования)
   migrations/003_recurring_link.sql  связь расходов и правил импорта с регулярными платежами
+  migrations/004_for_month.sql  за какой месяц оплата регулярного платежа
   src/server.js            Fastify, запуск миграций
   src/auth.js              вход по паролю, подписанная кука
   src/routes/*.js          REST API с валидацией JSON Schema

@@ -32,3 +32,25 @@ export function rangeLabel(month, d = 1) {
   const f = (s) => new Date(`${s}T12:00:00`).toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
   return `${f(from)} – ${f(last)}`;
 }
+
+/**
+ * Дата списания, за которую засчитывается оплата регулярного платежа.
+ * forMonth ('YYYY-MM') — выбран вручную; иначе для ежемесячного платежа с днём списания —
+ * ближайшая дата списания (прошлый, этот или следующий месяц; при равенстве — более поздняя,
+ * чаще платят заранее). Без дня списания — сама дата оплаты.
+ */
+export function dueDate(date, day, forMonth, monthly = true) {
+  const at = (y, m, d) => { const [yy, mm] = ym(y, m); return boundary(yy, mm, d); };
+  if (forMonth) { const [y, m] = forMonth.split('-').map(Number); return at(y, m, day || 1); }
+  if (!day || !monthly) return date;
+  const [y, m] = date.split('-').map(Number);
+  const utc = (s) => Date.parse(`${s}T00:00:00Z`); // в UTC, чтобы переход на летнее время не ломал равенство
+  const t = utc(date);
+  let best = null, bestD = Infinity;
+  for (const k of [-1, 0, 1]) {
+    const c = at(y, m + k, day);
+    const dist = Math.abs(utc(c) - t);
+    if (dist <= bestD) { best = c; bestD = dist; }
+  }
+  return best;
+}
