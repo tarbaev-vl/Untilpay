@@ -1,4 +1,5 @@
 import { query } from '../db.js';
+import { periodQs, range, prevDay } from '../period.js';
 
 const body = {
   type: 'object',
@@ -17,28 +18,9 @@ const body = {
   },
 };
 const idParam = { type: 'object', properties: { id: { type: 'string', pattern: '^[0-9]+$' } } };
-// Календарный месяц (?month=2026-10) или произвольный период (?from=2026-10-25&to=2026-11-25, to не входит)
-const periodQs = {
-  type: 'object',
-  properties: {
-    month: { type: 'string', pattern: '^[0-9]{4}-(0[1-9]|1[0-2])$' },
-    from: { type: 'string', format: 'date' },
-    to: { type: 'string', format: 'date' },
-    // linked=1: добавить оплаты регулярных платежей за ±62 дня — их могли внести заранее или с опозданием
-    linked: { type: 'string', enum: ['0', '1'] },
-  },
-  anyOf: [{ required: ['month'] }, { required: ['from', 'to'] }],
-};
+// linked=1: добавить оплаты регулярных платежей за ±62 дня — их могли внести заранее или с опозданием
+const listQs = { ...periodQs, properties: { ...periodQs.properties, linked: { type: 'string', enum: ['0', '1'] } } };
 const cols = 'id::text, amount, category, spent_on AS date, note, account, recurring_id::text, for_month, created_at, updated_at';
-const pad = (n) => String(n).padStart(2, '0');
-const isoDay = (d) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
-/** [начало, конец (не входит)] */
-const range = (q) => {
-  if (q.from && q.to) return [q.from, q.to];
-  const [y, m] = q.month.split('-').map(Number);
-  return [`${q.month}-01`, isoDay(new Date(Date.UTC(y, m, 1)))];
-};
-const prevDay = (s) => { const d = new Date(`${s}T00:00:00Z`); d.setUTCDate(d.getUTCDate() - 1); return isoDay(d); };
 
 const csvCell = (v) => {
   const s = String(v ?? '');
@@ -50,7 +32,7 @@ const csvCell = (v) => {
 export default async function expenses(app) {
   app.addHook('preHandler', app.requireAuth);
 
-  app.get('/api/expenses', { schema: { querystring: periodQs } }, async (req) => {
+  app.get('/api/expenses', { schema: { querystring: listQs } }, async (req) => {
     // original — описание из CSV-выписки, если расход импортирован
     const { rows } = await query(
       `SELECT e.id::text, e.amount, e.category, e.spent_on AS date, e.note, e.account, e.recurring_id::text, e.for_month, e.created_at, e.updated_at,

@@ -163,3 +163,8 @@ button.cat:hover{background:var(--sunk)}
 .cat.on .lbl{font-weight:700}
 .cats.filtered .cat:not(.on){opacity:.5}
 .cats.filtered .cat:not(.on):hover{opacity:.85}
+/* incomes */
+.col{display:flex;flex-direction:column;gap:20px;min-width:0}
+.amt.plus{color:var(--good)}
+.chip.inc{color:var(--good);background:transparent;border:1px solid currentColor}
+#incBySrc{font-size:.82rem;color:var(--muted);padding:10px 16px;border-bottom:1px solid var(--line)}

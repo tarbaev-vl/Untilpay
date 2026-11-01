@@ -8,6 +8,7 @@ const row = {
   datetime: { type: 'string', maxLength: 40, default: '' },
   amount: { type: 'number', exclusiveMinimum: 0, maximum: 1e9 },
   original: { type: 'string', minLength: 1, maxLength: 500 },
+  kind: { type: 'string', enum: ['expense', 'income'], default: 'expense' }, // поступления становятся доходами
 };
 const account = { type: 'string', minLength: 1, maxLength: 100 };
 
@@ -49,8 +50,8 @@ const commitBody = {
 };
 
 const round2 = (v) => Math.round(v * 100) / 100;
-// Ключ одинаковых строк выписки (без порядкового номера)
-const baseKey = (acc, r) => [acc, r.datetime || r.date, round2(r.amount).toFixed(2), r.original.trim()].join('|');
+// Ключ одинаковых строк выписки (без порядкового номера). У доходов свой префикс, ключи расходов прежние
+const baseKey = (acc, r) => [...(r.kind === 'income' ? ['income'] : []), acc, r.datetime || r.date, round2(r.amount).toFixed(2), r.original.trim()].join('|');
 const fingerprint = (acc, r, n) => createHash('sha256').update(`${baseKey(acc, r)}|${n}`).digest('hex');
 
 /** «CARD 4421 ALPHAMEGA LIMASSOL» -> «card alphamega limassol»: без номеров карт и ссылок на платёж. */
@@ -82,16 +83,16 @@ export default async function importRoutes(app) {
 
     const [known, rules, recurring] = await Promise.all([
       query('SELECT fingerprint, status FROM import_tx WHERE fingerprint = ANY($1)', [rows.map((r) => r.fp)]),
-      query('SELECT pattern, note, category, recurring_id::text FROM import_rules WHERE pattern = ANY($1)', [[...new Set(rows.map((r) => r.pattern))]]),
+      query('SELECT kind, pattern, note, category, recurring_id::text FROM import_rules WHERE pattern = ANY($1)', [[...new Set(rows.map((r) => r.pattern))]]),
       query('SELECT id::text, name, amount, category FROM recurring WHERE active ORDER BY id'),
     ]);
     const status = new Map(known.rows.map((r) => [r.fingerprint, r.status]));
-    const rule = new Map(rules.rows.map((r) => [r.pattern, r]));
+    const rule = new Map(rules.rows.map((r) => [`${r.kind}|${r.pattern}`, r]));
 
     return rows.map(({ fp, pattern, ...r }) => {
-      const ru = rule.get(pattern);
+      const ru = rule.get(`${r.kind}|${pattern}`);
       if (ru) return { ...r, status: status.get(fp) || 'new', note: ru.note, category: ru.category, recurring_id: ru.recurring_id };
-      const p = matchRecurring(recurring.rows, r);
+      const p = r.kind === 'income' ? null : matchRecurring(recurring.rows, r);
       return {
         ...r,
         status: status.get(fp) || 'new',
@@ -106,7 +107,7 @@ export default async function importRoutes(app) {
   app.post('/api/import/commit', { bodyLimit: 2 * 1024 * 1024, schema: { body: commitBody } }, async (req) => {
     const acc = req.body.account;
     return tx(async (c) => {
-      let imported = 0, skipped = 0;
+      let imported = 0, incomes = 0, skipped = 0;
       for (const it of req.body.items) {
         const original = it.original.trim();
         const amount = round2(it.amount);
@@ -132,27 +133,38 @@ export default async function importRoutes(app) {
         if (!rowCount) continue;
 
         const note = it.note.trim() || original;
-        const { rows: [e] } = await c.query(
-          `INSERT INTO expenses (amount, category, spent_on, note, account, recurring_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
-          [amount, it.category, it.date, note, acc, it.recurring_id],
-        );
-        await c.query('UPDATE import_tx SET expense_id = $1 WHERE fingerprint = $2', [e.id, fp]);
+        const recId = it.kind === 'income' ? null : it.recurring_id;
+        if (it.kind === 'income') {
+          // у дохода в category приходит источник
+          const { rows: [i] } = await c.query(
+            `INSERT INTO incomes (amount, source, received_on, note, account) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
+            [amount, it.category, it.date, note, acc],
+          );
+          await c.query('UPDATE import_tx SET income_id = $1 WHERE fingerprint = $2', [i.id, fp]);
+          incomes += 1;
+        } else {
+          const { rows: [e] } = await c.query(
+            `INSERT INTO expenses (amount, category, spent_on, note, account, recurring_id) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`,
+            [amount, it.category, it.date, note, acc, recId],
+          );
+          await c.query('UPDATE import_tx SET expense_id = $1 WHERE fingerprint = $2', [e.id, fp]);
+        }
         imported += 1;
 
-        // Запоминаем переименование и связь с регулярным платежом, чтобы в следующий раз подставить их сами
+        // Запоминаем переименование, категорию/источник и связь с регулярным платежом, чтобы в следующий раз подставить их сами
         const pattern = rulePattern(original);
-        if (note !== original || it.category !== DEFAULT_CAT || it.recurring_id) {
+        if (note !== original || it.category !== DEFAULT_CAT || recId) {
           await c.query(
-            `INSERT INTO import_rules (pattern, note, category, recurring_id) VALUES ($1, $2, $3, $4)
-             ON CONFLICT (pattern) DO UPDATE SET note = EXCLUDED.note, category = EXCLUDED.category,
+            `INSERT INTO import_rules (kind, pattern, note, category, recurring_id) VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (kind, pattern) DO UPDATE SET note = EXCLUDED.note, category = EXCLUDED.category,
                recurring_id = EXCLUDED.recurring_id, updated_at = now()`,
-            [pattern, note, it.category, it.recurring_id],
+            [it.kind, pattern, note, it.category, recId],
           );
         } else {
-          await c.query('DELETE FROM import_rules WHERE pattern = $1', [pattern]);
+          await c.query('DELETE FROM import_rules WHERE kind = $1 AND pattern = $2', [it.kind, pattern]);
         }
       }
-      return { imported, skipped };
+      return { imported, incomes, skipped };
     });
   });
 }

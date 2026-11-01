@@ -57,6 +57,7 @@
           <label class="f grow" for="mDesc">Описание<select id="mDesc"></select></label>
           <label class="f" for="mAmt">Сумма (±)<select id="mAmt"></select></label>
           <label class="f" for="mDebit">Или списание<select id="mDebit"></select></label>
+          <label class="f" for="mCredit" id="mCreditWrap">Поступление<select id="mCredit"></select></label>
         </div>
         <label class="check" id="mNegWrap"><input type="checkbox" id="mNeg"> Расходы записаны со знаком минус</label>
       </div>
@@ -78,7 +79,9 @@
     <div class="tile"><div class="eyebrow"><span class="dot d-subs"></span>Подписки</div><div class="val" id="tSubs">—</div><div class="sub" id="tSubsSub">в месяц</div></div>
     <div class="tile"><div class="eyebrow"><span class="dot d-var"></span>Расходы за месяц</div><div class="val" id="tVar">—</div><div class="sub" id="tVarSub">—</div></div>
     <div class="tile rest"><div class="eyebrow">Остаток</div><div class="val" id="tRest">—</div>
-      <label class="income sub" for="income">Доход в месяц <input id="income" class="num" inputmode="decimal" placeholder="0"></label>
+      <div class="sub" id="tIncFact"></div>
+      <div class="sub" id="tExpected" hidden></div>
+      <label class="income sub" for="income">План дохода <input id="income" class="num" inputmode="decimal" placeholder="0"></label>
       <label class="income sub" for="pstart">Месяц с <input id="pstart" class="num" inputmode="numeric" maxlength="2" placeholder="1"> числа</label></div>
   </section>
 
@@ -89,6 +92,7 @@
   </section>
 
   <div class="cols">
+    <div class="col">
     <section class="panel" aria-labelledby="recH">
       <div class="panel-h"><h2 id="recH">Регулярные платежи</h2><span class="meta" id="recMeta"></span></div>
       <form class="add" id="recForm" autocomplete="off">
@@ -116,6 +120,27 @@
       <div class="list" id="recList"></div>
     </section>
 
+    <section class="panel" aria-labelledby="incH">
+      <div class="panel-h"><h2 id="incH">Доходы</h2><span class="meta" id="incMeta"></span></div>
+      <form class="add" id="incForm" autocomplete="off">
+        <div class="row">
+          <label class="f amt" for="iAmt">Сумма, €<input id="iAmt" class="num" required inputmode="decimal" placeholder="0,00"></label>
+          <label class="f grow" for="iSrc">Источник<input id="iSrc" list="incSources" maxlength="100" placeholder="Зарплата, фриланс, возврат…"></label>
+          <label class="f" for="iDate">Дата<input id="iDate" type="date" required></label>
+        </div>
+        <div class="row">
+          <label class="f grow" for="iNote">Комментарий<input id="iNote" maxlength="500" placeholder="За октябрь, проект X…"></label>
+          <label class="f" for="iAcc">Счёт<select id="iAcc"></select></label>
+        </div>
+        <div class="actions"><span class="hint" id="iHint"></span>
+          <button type="button" class="btn ghost" id="iCancel" hidden>Отмена</button>
+          <button class="btn" id="iSubmit">Добавить доход</button></div>
+      </form>
+      <div class="subhead" id="incBySrc" hidden></div>
+      <div class="list" id="incList"></div>
+    </section>
+    </div>
+
     <section class="panel" aria-labelledby="expH">
       <div class="panel-h"><h2 id="expH">Расходы</h2><span class="meta" id="expMeta"></span></div>
       <form class="add" id="expForm" autocomplete="off">
@@ -134,13 +159,14 @@
           <button type="button" class="btn ghost" id="eCancel" hidden>Отмена</button>
           <button class="btn" id="eSubmit">Добавить расход</button></div>
       </form>
-      <div class="subhead"><span class="eyebrow">По категориям, вместе с регулярными</span>
+      <div class="subhead"><span class="eyebrow">По категориям</span>
         <button type="button" class="op" id="catReset" hidden>Показать все</button></div>
       <div class="cats" id="cats"></div>
       <div class="list" id="expList"></div>
     </section>
   </div>
 </div>
+<datalist id="incSources"></datalist>
 <div class="toast" id="toast" hidden role="status"></div>
 <script src="/app.js" type="module"></script>
 </body>

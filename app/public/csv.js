@@ -105,23 +105,25 @@ export function guessMapping(headers) {
   if (date < 0) date = findCol(headers, /date|дата|datum/);
   const desc = findCol(headers, /description|details|narrative|описан|назначен|payee|merchant|reference/);
   const debit = findCol(headers, /debit|withdraw|списан|расход/);
+  const credit = findCol(headers, /credit|кредит|зачисл|поступ|приход/);
   const amount = debit >= 0 ? -1 : findCol(headers, /amount|сумма|betrag/);
-  return { date, desc, amount, debit };
+  return { date, desc, amount, debit, credit };
 }
 
 const LIMIT = 500; // описание в базе — до 500 символов
 
 /**
- * Строки таблицы -> транзакции-расходы { date, datetime, amount (>0), original }.
- * format 'revolut' использует свои колонки; иначе mapping = { date, desc, amount, debit, negSign }.
- * Поступления, незавершённые и не-EUR операции отбрасываются и считаются в dropped.
+ * Строки таблицы -> транзакции { date, datetime, amount (>0), original, kind: 'expense' | 'income' }.
+ * format 'revolut' использует свои колонки; иначе mapping = { date, desc, amount, debit, credit, negSign }.
+ * Незавершённые и не-EUR операции отбрасываются и считаются в dropped.
  */
 export function toTransactions({ headers, rows }, format, mapping) {
-  const dropped = { income: 0, pending: 0, cancelled: 0, currency: 0, other: 0, bad: 0 };
+  const dropped = { pending: 0, cancelled: 0, currency: 0, other: 0, bad: 0 };
   const out = [];
-  const push = (date, amount, original) => {
-    out.push({ date: date.date, datetime: date.datetime, amount, original: (original || '(без описания)').slice(0, LIMIT) });
+  const push = (date, amount, original, kind) => {
+    out.push({ date: date.date, datetime: date.datetime, amount, original: (original || '(без описания)').slice(0, LIMIT), kind });
   };
+  const r2 = (v) => Math.round(v * 100) / 100;
 
   if (format === 'revolut') {
     const col = (n) => headers.findIndex((h) => norm(h) === n);
@@ -130,15 +132,16 @@ export function toTransactions({ headers, rows }, format, mapping) {
       const state = String(r[c.state] || '').toUpperCase();
       const amt = parseAmount(r[c.amount]);
       const date = parseDate(r[c.started]);
-      if (!date || Number.isNaN(amt)) { dropped.bad++; continue; }
-      if (amt >= 0) { dropped.income++; continue; }
+      if (!date || Number.isNaN(amt) || amt === 0) { dropped.bad++; continue; }
       if (state === 'PENDING') { dropped.pending++; continue; }
       if (state !== 'COMPLETED') { dropped.cancelled++; continue; }
       if (c.cur >= 0 && String(r[c.cur]).toUpperCase() !== 'EUR') { dropped.currency++; continue; }
       // переводы в «Сбережения» видны и в основном счёте — сами копилки пропускаем
       if (c.product >= 0 && /savings|deposit/i.test(r[c.product])) { dropped.other++; continue; }
       const fee = c.fee >= 0 ? Math.abs(parseAmount(r[c.fee]) || 0) : 0;
-      push(date, Math.round((-amt + fee) * 100) / 100, r[c.desc]);
+      if (amt < 0) push(date, r2(-amt + fee), r[c.desc], 'expense');
+      else if (amt - fee > 0) push(date, r2(amt - fee), r[c.desc], 'income');
+      else dropped.bad++;
     }
     return { rows: out, dropped };
   }
@@ -149,18 +152,19 @@ export function toTransactions({ headers, rows }, format, mapping) {
   for (const r of rows) {
     const date = parseDate(r[m.date], dayFirst);
     if (!date) { dropped.bad++; continue; }
-    let amt;
+    const desc = m.desc >= 0 ? r[m.desc] : '';
     if (m.debit >= 0) {
-      const v = parseAmount(r[m.debit]);
-      if (Number.isNaN(v) || v === 0) { dropped.income++; continue; } // пустой дебет — поступление
-      amt = Math.abs(v);
+      // отдельные колонки: непустое списание — расход, непустое поступление — доход
+      const d = parseAmount(r[m.debit]), c = m.credit >= 0 ? parseAmount(r[m.credit]) : NaN;
+      if (d) push(date, Math.abs(d), desc, 'expense');
+      else if (c) push(date, Math.abs(c), desc, 'income');
+      else dropped.bad++;
     } else {
+      // одна колонка со знаком: знак расходов задаёт negSign, противоположный — доход
       const v = parseAmount(r[m.amount]);
-      if (Number.isNaN(v)) { dropped.bad++; continue; }
-      if (m.negSign ? v >= 0 : v <= 0) { dropped.income++; continue; }
-      amt = Math.abs(v);
+      if (!v) { dropped.bad++; continue; }
+      push(date, Math.abs(v), desc, (m.negSign ? v < 0 : v > 0) ? 'expense' : 'income');
     }
-    push(date, amt, m.desc >= 0 ? r[m.desc] : '');
   }
   return { rows: out, dropped };
 }
