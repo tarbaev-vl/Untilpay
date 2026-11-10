@@ -11,7 +11,7 @@ export default {
   'top.month': 'Месяц',
   'top.prev': 'Предыдущий месяц',
   'top.next': 'Следующий месяц',
-  'top.import': 'Импорт CSV',
+  'top.import': 'Импорт',
   'top.download': 'Скачать CSV',
   'top.logout': 'Выйти',
 
@@ -42,6 +42,8 @@ export default {
 
   'import.title': 'Импорт из CSV-выписки',
   'import.meta': 'Revolut, Bank of Cyprus или любой CSV',
+  'import.menu_csv': 'CSV-файл',
+  'import.menu_bank': 'Из банка',
   'import.file': 'Файл выписки',
   'import.description': 'Описание',
   'import.amount_signed': 'Сумма (±)',
@@ -82,7 +84,8 @@ export default {
   'import.done_incomes': ' (доходов {n})',
   'import.done_skipped': ', скрыто {n}',
 
-  'bank.title': 'Из банка',
+  'bank.panel_title': 'Синхронизация с банком',
+  'bank.panel_meta': 'Транзакции ваших счетов через Enable Banking',
   'bank.setup': 'Синхронизация с банком не настроена. Зарегистрируйте приложение на enablebanking.com, положите приватный ключ в папку secrets/ и задайте EB_APP_ID и EB_REDIRECT_URL в .env (см. README → Bank sync). Импорт CSV работает и без этого.',
   'bank.country': 'Страна',
   'bank.bank': 'Банк',

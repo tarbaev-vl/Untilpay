@@ -550,15 +550,30 @@ $('nextM').onclick = () => shiftMonth(1);
 
 /* ---------- CSV import ---------- */
 const FORMAT_ACC = { revolut: 'Revolut', boc: 'Bank of Cyprus' };
-// table — a parsed CSV file; bank — rows loaded from a bank account { id, name, rows, dropped }; only one of them is set
-const IMP = { table: null, format: null, bank: null, items: [], dropped: null, showHidden: false, seq: 0 };
+// mode — 'csv' | 'bank' (which source the panel shows), null when closed;
+// table — a parsed CSV file; bank — rows loaded from a bank account { id, name, rows, dropped, from, to }
+const IMP = { mode: null, table: null, format: null, bank: null, items: [], dropped: null, showHidden: false, seq: 0 };
+const IMPORT_MODES = { csv: ['import.title', 'import.meta'], bank: ['bank.panel_title', 'bank.panel_meta'] };
 const visibleImport = () => IMP.items.filter((i) => i.status === 'new' || (i.status === 'skipped' && IMP.showHidden));
 
-function openImport() { $('importPanel').hidden = false; $('impFile').focus(); loadBank(); }
+/** Opens the import panel for one source; switching to the other source drops the rows loaded so far */
+async function openImport(mode) {
+  if (!$('importPanel').hidden && IMP.mode === mode) return;
+  if (!$('importPanel').hidden) closeImport();
+  IMP.mode = mode;
+  const [title, meta] = IMPORT_MODES[mode];
+  $('impH').textContent = t(title); $('impMeta').textContent = t(meta);
+  $('csvBox').hidden = mode !== 'csv'; $('bankBox').hidden = mode !== 'bank';
+  $('importPanel').hidden = false;
+  if (mode === 'csv') { $('impFile').focus(); return; }
+  await loadBank();
+  const first = $('bankBox').querySelector('.bank-row .btn:not(:disabled), #bankCountry:not([hidden])');
+  if (first && IMP.mode === 'bank') first.focus();
+}
 function closeImport() {
   $('importPanel').hidden = true; $('impFile').value = ''; $('impShowHidden').checked = false; $('impHint').textContent = '';
-  Object.assign(IMP, { table: null, format: null, bank: null, items: [], dropped: null, showHidden: false }); IMP.seq++;
-  $('impMap').hidden = true; $('impMeta').textContent = t('import.meta'); renderImport();
+  Object.assign(IMP, { mode: null, table: null, format: null, bank: null, items: [], dropped: null, showHidden: false }); IMP.seq++;
+  $('impMap').hidden = true; $('impAcc').disabled = false; renderImport();
 }
 function fillCols(sel, headers, val, optional) {
   sel.innerHTML = '';
@@ -654,13 +669,38 @@ function updateImportBtn() {
   $('impSubmit').textContent = parts.join(' · ') || t('import.submit');
 }
 
-$('impOpen').onclick = () => ($('importPanel').hidden ? openImport() : closeImport());
+// Import menu: hover opens it with a mouse, click/tap opens it on phones and from the keyboard
+const impMenu = $('impMenu');
+const menuItems = () => [...impMenu.querySelectorAll('[role="menuitem"]')];
+let menuTimer;
+function setMenu(open, focusFirst = false) {
+  clearTimeout(menuTimer);
+  impMenu.hidden = !open; $('impOpen').setAttribute('aria-expanded', String(open));
+  if (open && focusFirst) menuItems()[0].focus();
+}
+$('impMenuWrap').addEventListener('mouseenter', () => setMenu(true));
+// a short delay lets the pointer cross the gap between the button and the menu
+$('impMenuWrap').addEventListener('mouseleave', () => { clearTimeout(menuTimer); menuTimer = setTimeout(() => setMenu(false), 200); });
+// detail === 0: the click came from Enter/Space — move the focus into the menu
+$('impOpen').onclick = (e) => setMenu(true, e.detail === 0);
+$('impOpen').addEventListener('keydown', (e) => { if (e.key === 'ArrowDown') { e.preventDefault(); setMenu(true, true); } });
+impMenu.addEventListener('keydown', (e) => {
+  const items = menuItems(); const i = items.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault(); items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  } else if (e.key === 'Escape') { setMenu(false); $('impOpen').focus(); } else if (e.key === 'Tab') setMenu(false);
+});
+impMenu.addEventListener('click', (e) => {
+  const item = e.target.closest('[data-mode]'); if (!item) return;
+  setMenu(false); openImport(item.dataset.mode);
+});
+document.addEventListener('click', (e) => { if (!impMenu.hidden && !$('impMenuWrap').contains(e.target)) setMenu(false); });
 $('impCancel').onclick = closeImport;
 $('impFile').addEventListener('change', async () => {
   const f = $('impFile').files[0]; if (!f) return;
   const table = parseCsv(await f.text());
-  if (!table.rows.length) { closeImport(); openImport(); $('impHint').textContent = t('import.no_rows'); return; }
-  IMP.bank = null; IMP.table = table; IMP.format = detectFormat(table.headers);
+  if (!table.rows.length) { closeImport(); openImport('csv'); $('impHint').textContent = t('import.no_rows'); return; }
+  IMP.bank = null; $('impAcc').disabled = false; IMP.table = table; IMP.format = detectFormat(table.headers);
   if (FORMAT_ACC[IMP.format]) $('impAcc').value = FORMAT_ACC[IMP.format];
   $('impMap').hidden = IMP.format === 'revolut';
   if (IMP.format !== 'revolut') {
@@ -765,7 +805,8 @@ async function syncBank(conn, acc, range, btn) {
     const r = await api('GET', `/api/bank/transactions?account_id=${acc.id}&from=${range.from}&to=${range.to}`);
     $('impFile').value = ''; $('impMap').hidden = true; $('bankHint').textContent = '';
     if (![...$('impAcc').options].some((o) => o.value === r.account)) $('impAcc').appendChild(Object.assign(el('option', null, label(r.account)), { value: r.account }));
-    $('impAcc').value = r.account;
+    // the bank defines the account: it cannot be changed for these rows
+    $('impAcc').value = r.account; $('impAcc').disabled = true;
     Object.assign(IMP, { table: null, format: null, bank: { id: acc.id, name: conn.aspsp_name, rows: r.rows, dropped: r.dropped, from: r.from, to: r.to } });
     await previewImport();
   } catch (err) {
@@ -794,8 +835,6 @@ function renderBank() {
     c.accounts.forEach((a) => {
       const row = el('div', 'bank-row');
       const name = el('span', 'nm', [a.name, a.iban_tail ? `••${a.iban_tail}` : '', a.currency].filter(Boolean).join(' ') || c.aspsp_name);
-      const sel = el('select', 'fld'); fillSelect(sel, [...new Set([...ACCS, a.account])], a.account); sel.setAttribute('aria-label', t('field.account'));
-      sel.onchange = () => write(async () => { await api('PUT', `/api/bank/accounts/${a.id}`, { account: sel.value }); a.account = sel.value; });
       // period: a ready-made range with its dates shown next to it, or two date fields for a custom one
       const per = el('select', 'fld per'); per.setAttribute('aria-label', t('bank.period'));
       SYNC_PERIODS.forEach((p) => { const o = el('option', null, t(`bank.p_${p}`)); o.value = p; per.appendChild(o); });
@@ -819,7 +858,7 @@ function renderBank() {
       per.onchange = () => { saveSyncPeriod(per.value); renderBank(); };
       go.onclick = () => { const r = syncRange(a); if (validRange(r)) syncBank(c, a, { ...r }, go); };
       refresh();
-      row.append(name, sel, per, rng, custom, go); L.appendChild(row);
+      row.append(name, per, rng, custom, go); L.appendChild(row);
     });
   });
 }
@@ -830,7 +869,7 @@ function bankReturn() {
   const result = new URLSearchParams(window.location.search).get('bank');
   if (!BANK_RESULTS.includes(result)) return;
   window.history.replaceState(null, '', window.location.pathname);
-  openImport(); toast(t(`bank.result_${result}`));
+  openImport('bank'); toast(t(`bank.result_${result}`));
 }
 
 /* ---------- sign-in ---------- */

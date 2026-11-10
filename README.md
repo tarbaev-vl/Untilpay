@@ -222,7 +222,7 @@ the totals. All figures at the top are calculated only from actual expenses in t
 
 ## CSV import
 
-The "Import CSV" button is in the header. Revolut and Bank of Cyprus are detected by their headers.
+"Import ▾" in the header → "CSV file". Revolut and Bank of Cyprus are detected by their headers.
 For any other CSV you choose the date, description and amount (or debit) columns. Pending and
 non-EUR operations are skipped. Credits are shown with an "income" mark and a source field instead
 of a category; transfers between your own accounts can be unchecked — this is remembered.
@@ -265,10 +265,11 @@ EB_PRIVATE_KEY_FILE=/run/secrets/enablebanking.pem
 EB_REDIRECT_URL=http://localhost:8080/api/bank/callback   # exactly as registered
 ```
 
-**Use:** "Import CSV" → "From the bank". Choose the country and the bank, press "Connect bank",
-sign in at the bank and confirm access; you come back with the accounts listed. For each account
-choose which app account it belongs to, pick a period and press "Sync": the transactions appear in
-the review list below. Transactions already imported or hidden are recognised and not offered again.
+**Use:** "Import ▾" in the header → "From the bank". Choose the country and the bank, press "Connect bank",
+sign in at the bank and confirm access; you come back with the accounts listed. Transactions of a
+bank account go to the app account of that bank (Revolut, Bank of Cyprus; for other banks — an
+account named after the bank). Pick a period and press "Sync": the transactions appear in the
+review list below. Transactions already imported or hidden are recognised and not offered again.
 
 Periods: **Since the last sync** (default: from a week before the last reviewed date, the first time
 from the start of the budget month), **Today**, **Week** (the last 7 days), **Budget month** (from the

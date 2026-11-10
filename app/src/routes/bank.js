@@ -22,8 +22,8 @@ const fail = (req, reply, err) => {
   return reply.code(ERR_STATUS[err.code] || 502).send({ error: `bank_${err.code}`, message: message(req, err.code, err.params) });
 };
 
-/** App account suggested for a bank by its name; the user can change it */
-const guessAccount = (aspsp) => (/revolut/i.test(aspsp) ? 'Revolut' : /bank of cyprus/i.test(aspsp) ? 'Bank of Cyprus' : DEFAULT_ACCOUNT);
+/** App account of a bank: the standard account names for the known banks, otherwise the bank name itself */
+const accountFor = (aspsp) => (/revolut/i.test(aspsp) ? 'Revolut' : /bank of cyprus/i.test(aspsp) ? 'Bank of Cyprus' : aspsp.slice(0, 100) || DEFAULT_ACCOUNT);
 
 export default async function bank(app) {
   const auth = { preHandler: app.requireAuth };
@@ -126,7 +126,7 @@ export default async function bank(app) {
           `INSERT INTO bank_accounts (connection_id, uid, ident_hash, name, iban_tail, currency, account, synced_to)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
           [conn.id, a.uid, hash, String(a.name || a.product || a.details || '').slice(0, 200), String(iban).slice(-4),
-            a.currency || '', was?.account || guessAccount(conn.aspsp_name), was?.synced_to || null],
+            a.currency || '', was?.account || accountFor(conn.aspsp_name), was?.synced_to || null],
         );
       }
       const ids = [...new Set(prev.map((p) => p.id))];

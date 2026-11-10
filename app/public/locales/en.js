@@ -11,7 +11,7 @@ export default {
   'top.month': 'Month',
   'top.prev': 'Previous month',
   'top.next': 'Next month',
-  'top.import': 'Import CSV',
+  'top.import': 'Import',
   'top.download': 'Download CSV',
   'top.logout': 'Sign out',
 
@@ -42,6 +42,8 @@ export default {
 
   'import.title': 'Import from a CSV statement',
   'import.meta': 'Revolut, Bank of Cyprus or any CSV',
+  'import.menu_csv': 'CSV file',
+  'import.menu_bank': 'From the bank',
   'import.file': 'Statement file',
   'import.description': 'Description',
   'import.amount_signed': 'Amount (±)',
@@ -82,7 +84,8 @@ export default {
   'import.done_incomes': ' ({n} income)',
   'import.done_skipped': ', {n} hidden',
 
-  'bank.title': 'From the bank',
+  'bank.panel_title': 'Bank sync',
+  'bank.panel_meta': 'Your account transactions through Enable Banking',
   'bank.setup': 'Bank sync is not configured. Register an application at enablebanking.com, put its private key into the secrets/ folder and set EB_APP_ID and EB_REDIRECT_URL in .env (see README → Bank sync). CSV import works without it.',
   'bank.country': 'Country',
   'bank.bank': 'Bank',

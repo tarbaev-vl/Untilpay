@@ -38,7 +38,14 @@
         <span class="mlbl"><span id="monthLabel">—</span><small id="periodLabel" hidden></small></span>
         <button class="iconbtn" id="nextM" data-i18n-attr="aria-label:top.next" aria-label="Next month">›</button>
       </div>
-      <button class="btn ghost small" id="impOpen" type="button" data-i18n="top.import">Import CSV</button>
+      <!-- Import menu: opens on hover and on click/tap (no hover on phones) -->
+      <div class="menu" id="impMenuWrap">
+        <button class="btn ghost small" id="impOpen" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="impMenu"><span data-i18n="top.import">Import</span> <span aria-hidden="true">▾</span></button>
+        <div class="menu-list" id="impMenu" role="menu" hidden>
+          <button type="button" role="menuitem" data-mode="csv" data-i18n="import.menu_csv">CSV file</button>
+          <button type="button" role="menuitem" data-mode="bank" data-i18n="import.menu_bank">From the bank</button>
+        </div>
+      </div>
       <a class="btn ghost small" id="csvLink" href="#" data-i18n="top.download">Download CSV</a>
       <button class="btn ghost small" id="logout" type="button" hidden data-i18n="top.logout">Sign out</button>
     </div>
@@ -49,9 +56,8 @@
   <section class="panel" id="importPanel" aria-labelledby="impH" hidden>
     <div class="panel-h"><h2 id="impH" data-i18n="import.title">Import from a CSV statement</h2><span class="meta" id="impMeta" data-i18n="import.meta">Revolut, Bank of Cyprus or any CSV</span></div>
     <div class="add">
-      <!-- Bank sync through Enable Banking: an alternative to a CSV file, uses the same review list below -->
-      <div class="bank" id="bankBox">
-        <div class="eyebrow" data-i18n="bank.title">From the bank</div>
+      <!-- Bank sync through Enable Banking ("From the bank" mode); rows go to the same review list as a CSV file -->
+      <div class="bank" id="bankBox" hidden>
         <div class="bank-list" id="bankList"></div>
         <div class="row" id="bankConnect" hidden>
           <label class="f bank-cc" for="bankCountry"><span data-i18n="bank.country">Country</span><input id="bankCountry" maxlength="2" value="CY" autocomplete="off"></label>
@@ -60,6 +66,8 @@
         </div>
         <div class="hint" id="bankHint" role="status"></div>
       </div>
+      <!-- CSV statement ("CSV file" mode) -->
+      <div class="csv" id="csvBox" hidden>
       <div class="row">
         <label class="f grow" for="impFile"><span data-i18n="import.file">Statement file</span><input id="impFile" type="file" accept=".csv,text/csv,text/plain"></label>
         <label class="f" for="impAcc"><span data-i18n="field.account">Account</span><select id="impAcc"></select></label>
@@ -73,6 +81,7 @@
           <label class="f" for="mCredit" id="mCreditWrap"><span data-i18n="import.credit">Credit</span><select id="mCredit"></select></label>
         </div>
         <label class="check" id="mNegWrap"><input type="checkbox" id="mNeg"> <span data-i18n="import.neg">Expenses are written with a minus sign</span></label>
+      </div>
       </div>
       <div class="imp-tools" id="impTools" hidden>
         <span class="hint" id="impSummary"></span>
