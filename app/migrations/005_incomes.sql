@@ -1,4 +1,4 @@
--- Фактические доходы
+-- Actual income
 CREATE TABLE incomes (
   id          BIGSERIAL PRIMARY KEY,
   amount      NUMERIC(12,2) NOT NULL CHECK (amount > 0),
@@ -11,9 +11,9 @@ CREATE TABLE incomes (
 );
 CREATE INDEX incomes_received_on_idx ON incomes (received_on);
 
--- Импорт: транзакция выписки может стать доходом
+-- Import: a statement transaction may become an income
 ALTER TABLE import_tx ADD COLUMN income_id BIGINT REFERENCES incomes(id) ON DELETE SET NULL;
 
--- Правила раздельно для расходов и доходов (у доходов в category хранится источник)
+-- Separate rules for expenses and income (for income, category stores the source)
 ALTER TABLE import_rules ADD COLUMN kind TEXT NOT NULL DEFAULT 'expense' CHECK (kind IN ('expense','income'));
 ALTER TABLE import_rules DROP CONSTRAINT import_rules_pkey, ADD PRIMARY KEY (kind, pattern);

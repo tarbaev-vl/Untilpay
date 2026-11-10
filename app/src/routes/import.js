@@ -1,14 +1,14 @@
 import { createHash } from 'node:crypto';
 import { query, tx } from '../db.js';
 
-const DEFAULT_CAT = 'Другое';
+const DEFAULT_CAT = 'Другое'; // "Other": the stored default value; the UI translates it for display
 
 const row = {
   date: { type: 'string', format: 'date' },
   datetime: { type: 'string', maxLength: 40, default: '' },
   amount: { type: 'number', exclusiveMinimum: 0, maximum: 1e9 },
   original: { type: 'string', minLength: 1, maxLength: 500 },
-  kind: { type: 'string', enum: ['expense', 'income'], default: 'expense' }, // поступления становятся доходами
+  kind: { type: 'string', enum: ['expense', 'income'], default: 'expense' }, // credits become incomes
 };
 const account = { type: 'string', minLength: 1, maxLength: 100 };
 
@@ -50,17 +50,17 @@ const commitBody = {
 };
 
 const round2 = (v) => Math.round(v * 100) / 100;
-// Ключ одинаковых строк выписки (без порядкового номера). У доходов свой префикс, ключи расходов прежние
+// Key of identical statement rows (without the sequence number). Incomes get their own prefix, expense keys are unchanged
 const baseKey = (acc, r) => [...(r.kind === 'income' ? ['income'] : []), acc, r.datetime || r.date, round2(r.amount).toFixed(2), r.original.trim()].join('|');
 const fingerprint = (acc, r, n) => createHash('sha256').update(`${baseKey(acc, r)}|${n}`).digest('hex');
 
-/** «CARD 4421 ALPHAMEGA LIMASSOL» -> «card alphamega limassol»: без номеров карт и ссылок на платёж. */
+/** "CARD 4421 ALPHAMEGA LIMASSOL" -> "card alphamega limassol": no card numbers or payment references. */
 export function rulePattern(original) {
   const s = original.toLowerCase().trim();
   return s.split(/\s+/).filter((w) => !/\d/.test(w)).join(' ') || s.replace(/\s+/g, ' ');
 }
 
-/** Активный регулярный платёж с той же суммой и словом из названия в описании: «Netflix» 15,99 ↔ «NETFLIX.COM 4421». */
+/** An active recurring payment with the same amount and a word of its name in the description: "Netflix" 15.99 ↔ "NETFLIX.COM 4421". */
 function matchRecurring(recurring, r) {
   const text = r.original.toLowerCase();
   return recurring.find((p) => Math.abs(p.amount - r.amount) < 0.005
@@ -70,13 +70,13 @@ function matchRecurring(recurring, r) {
 export default async function importRoutes(app) {
   app.addHook('preHandler', app.requireAuth);
 
-  // Какие строки выписки новые, а какие уже импортированы или отклонены + подсказки из правил
+  // Which statement rows are new and which are already imported or rejected + suggestions from the rules
   app.post('/api/import/preview', { bodyLimit: 2 * 1024 * 1024, schema: { body: previewBody } }, async (req) => {
     const acc = req.body.account;
     const seen = new Map();
     const rows = req.body.rows.map((r) => {
       const k = baseKey(acc, r);
-      const n = seen.get(k) || 0; // одинаковые покупки в один день — разные транзакции
+      const n = seen.get(k) || 0; // identical purchases on the same day are separate transactions
       seen.set(k, n + 1);
       return { ...r, original: r.original.trim(), amount: round2(r.amount), n, fp: fingerprint(acc, r, n), pattern: rulePattern(r.original) };
     });
@@ -103,7 +103,7 @@ export default async function importRoutes(app) {
     });
   });
 
-  // Импорт отмеченных строк и запоминание отклонённых, одной транзакцией
+  // Import the checked rows and remember the rejected ones, in one transaction
   app.post('/api/import/commit', { bodyLimit: 2 * 1024 * 1024, schema: { body: commitBody } }, async (req) => {
     const acc = req.body.account;
     return tx(async (c) => {
@@ -123,7 +123,7 @@ export default async function importRoutes(app) {
           continue;
         }
 
-        // Атомарно занимаем отпечаток: новая строка или ранее отклонённая; уже импортированную пропускаем
+        // Claim the fingerprint atomically: a new row or a previously rejected one; an already imported row is skipped
         const { rowCount } = await c.query(
           `INSERT INTO import_tx (fingerprint, status, account, tx_date, amount, original)
            VALUES ($1, 'imported', $2, $3, $4, $5)
@@ -135,7 +135,7 @@ export default async function importRoutes(app) {
         const note = it.note.trim() || original;
         const recId = it.kind === 'income' ? null : it.recurring_id;
         if (it.kind === 'income') {
-          // у дохода в category приходит источник
+          // for an income, category carries the source
           const { rows: [i] } = await c.query(
             `INSERT INTO incomes (amount, source, received_on, note, account) VALUES ($1,$2,$3,$4,$5) RETURNING id`,
             [amount, it.category, it.date, note, acc],
@@ -151,7 +151,7 @@ export default async function importRoutes(app) {
         }
         imported += 1;
 
-        // Запоминаем переименование, категорию/источник и связь с регулярным платежом, чтобы в следующий раз подставить их сами
+        // Remember the rename, the category/source and the recurring payment link to fill them in next time
         const pattern = rulePattern(original);
         if (note !== original || it.category !== DEFAULT_CAT || recId) {
           await c.query(

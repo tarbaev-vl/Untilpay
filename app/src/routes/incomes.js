@@ -1,6 +1,7 @@
 import { query } from '../db.js';
 import { periodQs, range } from '../period.js';
 
+// 'Другое' ("Other") is the stored default value; the UI translates it for display
 const body = {
   type: 'object',
   required: ['amount', 'date'],
@@ -20,7 +21,7 @@ export default async function incomes(app) {
   app.addHook('preHandler', app.requireAuth);
 
   app.get('/api/incomes', { schema: { querystring: periodQs } }, async (req) => {
-    // original — описание из CSV-выписки, если доход импортирован
+    // original — the description from the CSV statement if the income was imported
     const { rows } = await query(
       `SELECT i.id::text, i.amount, i.source, i.received_on AS date, i.note, i.account, i.created_at, i.updated_at,
          t.original
@@ -32,7 +33,7 @@ export default async function incomes(app) {
     return rows;
   });
 
-  // Источники для подсказок: самые частые первыми
+  // Sources for suggestions: most frequent first
   app.get('/api/incomes/sources', async () => {
     const { rows } = await query('SELECT source FROM incomes GROUP BY source ORDER BY count(*) DESC, source LIMIT 50');
     return rows.map((r) => r.source);
@@ -54,13 +55,13 @@ export default async function incomes(app) {
        WHERE id=$6 RETURNING ${cols}`,
       [b.amount, b.source.trim() || 'Другое', b.date, b.note.trim(), b.account, req.params.id],
     );
-    if (!rows.length) return reply.code(404).send({ error: 'not_found', message: 'Доход не найден' });
+    if (!rows.length) return reply.code(404).send({ error: 'not_found', message: req.t('income.not_found') });
     return rows[0];
   });
 
   app.delete('/api/incomes/:id', { schema: { params: idParam } }, async (req, reply) => {
     const { rowCount } = await query('DELETE FROM incomes WHERE id=$1', [req.params.id]);
-    if (!rowCount) return reply.code(404).send({ error: 'not_found', message: 'Доход не найден' });
+    if (!rowCount) return reply.code(404).send({ error: 'not_found', message: req.t('income.not_found') });
     return reply.code(204).send();
   });
 }

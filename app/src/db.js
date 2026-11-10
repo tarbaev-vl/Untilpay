@@ -1,6 +1,6 @@
 import pg from 'pg';
 
-// NUMERIC -> number, DATE -> 'YYYY-MM-DD' (без сдвигов часового пояса)
+// NUMERIC -> number, DATE -> 'YYYY-MM-DD' (no time zone shifts)
 pg.types.setTypeParser(1700, (v) => (v === null ? null : Number(v)));
 pg.types.setTypeParser(1082, (v) => v);
 
@@ -11,7 +11,7 @@ export const pool = new pg.Pool({
 
 export const query = (text, params) => pool.query(text, params);
 
-/** Выполняет fn(client) в одной транзакции: COMMIT при успехе, ROLLBACK при ошибке. */
+/** Runs fn(client) in a single transaction: COMMIT on success, ROLLBACK on error. */
 export async function tx(fn) {
   const client = await pool.connect();
   try {

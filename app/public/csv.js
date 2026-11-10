@@ -1,9 +1,9 @@
-/* Разбор CSV-выписок: Revolut, Bank of Cyprus и любой другой формат с ручным выбором колонок.
-   Только чистые функции, без DOM — удобно проверять в Node. */
+/* Parsing CSV statements: Revolut, Bank of Cyprus and any other format with manual column selection.
+   Pure functions only, no DOM — easy to check in Node. */
 
 const pad = (n) => String(n).padStart(2, '0');
 
-/** Разделитель: тот из , ; \t, которого больше всего вне кавычек в первых строках. */
+/** Delimiter: whichever of , ; \t occurs most outside quotes in the first lines. */
 function detectDelimiter(text) {
   const lines = text.split(/\r?\n/).filter((l) => l.trim()).slice(0, 10);
   let best = ',', max = -1;
@@ -15,7 +15,7 @@ function detectDelimiter(text) {
   return best;
 }
 
-/** CSV -> { headers, rows }. Кавычки, "" внутри кавычек, переводы строк в кавычках, CRLF, BOM. */
+/** CSV -> { headers, rows }. Quotes, "" inside quotes, line breaks inside quotes, CRLF, BOM. */
 export function parseCsv(text) {
   text = String(text).replace(/^﻿/, '');
   const d = detectDelimiter(text);
@@ -33,7 +33,7 @@ export function parseCsv(text) {
   }
   if (cell || row.length) { row.push(cell); all.push(row); }
   const rows = all.map((r) => r.map((c) => c.trim())).filter((r) => r.some(Boolean));
-  // Над таблицей бывают строки с реквизитами счёта: заголовок — первая самая «полная» строка
+  // Account details may precede the table: the header is the first of the "fullest" rows
   const filled = (r) => r.filter(Boolean).length;
   const head = rows.slice(0, 30);
   const maxFilled = Math.max(0, ...head.map(filled));
@@ -42,7 +42,7 @@ export function parseCsv(text) {
   return { headers: rows[hi], rows: rows.slice(hi + 1) };
 }
 
-/** «1.234,56» / «1,234.56» / «-12,50» / «(12.00)» / «12.00-» / «€ 12» -> число или NaN. */
+/** "1.234,56" / "1,234.56" / "-12,50" / "(12.00)" / "12.00-" / "€ 12" -> a number or NaN. */
 export function parseAmount(s) {
   let v = String(s ?? '').replace(/[\s  ']/g, '');
   if (!v) return NaN;
@@ -60,7 +60,7 @@ export function parseAmount(s) {
   return neg ? -n : n;
 }
 
-/** День идёт первым (DD/MM/YYYY), если в колонке нет дат, где второе число больше 12. */
+/** The day comes first (DD/MM/YYYY) unless the column has dates whose second number is greater than 12. */
 export function detectDayFirst(values) {
   for (const s of values) {
     const m = /^(\d{1,2})[./-](\d{1,2})[./-]\d{2,4}/.exec(String(s).trim());
@@ -69,7 +69,7 @@ export function detectDayFirst(values) {
   return true;
 }
 
-/** Строка даты -> { date: 'YYYY-MM-DD', datetime: 'YYYY-MM-DD[ HH:MM[:SS]]' } или null. */
+/** Date string -> { date: 'YYYY-MM-DD', datetime: 'YYYY-MM-DD[ HH:MM[:SS]]' } or null. */
 export function parseDate(s, dayFirst = true) {
   s = String(s ?? '').trim();
   let y, mo, d, t;
@@ -90,7 +90,7 @@ export function parseDate(s, dayFirst = true) {
 const norm = (h) => String(h).toLowerCase().replace(/\s+/g, ' ').trim();
 const findCol = (headers, re, except = -1) => headers.findIndex((h, i) => i !== except && re.test(norm(h)));
 
-/** 'revolut' | 'boc' | null по строке заголовков. */
+/** 'revolut' | 'boc' | null by the header row. */
 export function detectFormat(headers) {
   const h = headers.map(norm);
   if (['started date', 'description', 'amount', 'currency', 'state'].every((x) => h.includes(x))) return 'revolut';
@@ -99,7 +99,7 @@ export function detectFormat(headers) {
   return null;
 }
 
-/** Догадка о колонках для ручного режима (индексы, -1 = нет). */
+/** Column guess for manual mode (indexes, -1 = none). Header keywords are matched in several languages. */
 export function guessMapping(headers) {
   let date = findCol(headers, /^(transaction|posting|booking|operation)? ?date|дата (операции|транзакции)/);
   if (date < 0) date = findCol(headers, /date|дата|datum/);
@@ -110,18 +110,20 @@ export function guessMapping(headers) {
   return { date, desc, amount, debit, credit };
 }
 
-const LIMIT = 500; // описание в базе — до 500 символов
+const LIMIT = 500; // the description in the database is up to 500 characters
+// "(no description)". Part of the import fingerprint, so it must not change or be translated
+const NO_DESCRIPTION = '(без описания)';
 
 /**
- * Строки таблицы -> транзакции { date, datetime, amount (>0), original, kind: 'expense' | 'income' }.
- * format 'revolut' использует свои колонки; иначе mapping = { date, desc, amount, debit, credit, negSign }.
- * Незавершённые и не-EUR операции отбрасываются и считаются в dropped.
+ * Table rows -> transactions { date, datetime, amount (>0), original, kind: 'expense' | 'income' }.
+ * format 'revolut' uses its own columns; otherwise mapping = { date, desc, amount, debit, credit, negSign }.
+ * Pending and non-EUR operations are dropped and counted in dropped.
  */
 export function toTransactions({ headers, rows }, format, mapping) {
   const dropped = { pending: 0, cancelled: 0, currency: 0, other: 0, bad: 0 };
   const out = [];
   const push = (date, amount, original, kind) => {
-    out.push({ date: date.date, datetime: date.datetime, amount, original: (original || '(без описания)').slice(0, LIMIT), kind });
+    out.push({ date: date.date, datetime: date.datetime, amount, original: (original || NO_DESCRIPTION).slice(0, LIMIT), kind });
   };
   const r2 = (v) => Math.round(v * 100) / 100;
 
@@ -136,7 +138,7 @@ export function toTransactions({ headers, rows }, format, mapping) {
       if (state === 'PENDING') { dropped.pending++; continue; }
       if (state !== 'COMPLETED') { dropped.cancelled++; continue; }
       if (c.cur >= 0 && String(r[c.cur]).toUpperCase() !== 'EUR') { dropped.currency++; continue; }
-      // переводы в «Сбережения» видны и в основном счёте — сами копилки пропускаем
+      // transfers to "Savings" also show up in the main account — the savings pockets themselves are skipped
       if (c.product >= 0 && /savings|deposit/i.test(r[c.product])) { dropped.other++; continue; }
       const fee = c.fee >= 0 ? Math.abs(parseAmount(r[c.fee]) || 0) : 0;
       if (amt < 0) push(date, r2(-amt + fee), r[c.desc], 'expense');
@@ -154,13 +156,13 @@ export function toTransactions({ headers, rows }, format, mapping) {
     if (!date) { dropped.bad++; continue; }
     const desc = m.desc >= 0 ? r[m.desc] : '';
     if (m.debit >= 0) {
-      // отдельные колонки: непустое списание — расход, непустое поступление — доход
+      // separate columns: a non-empty debit is an expense, a non-empty credit is an income
       const d = parseAmount(r[m.debit]), c = m.credit >= 0 ? parseAmount(r[m.credit]) : NaN;
       if (d) push(date, Math.abs(d), desc, 'expense');
       else if (c) push(date, Math.abs(c), desc, 'income');
       else dropped.bad++;
     } else {
-      // одна колонка со знаком: знак расходов задаёт negSign, противоположный — доход
+      // one signed column: negSign sets the sign of expenses, the opposite sign is income
       const v = parseAmount(r[m.amount]);
       if (!v) { dropped.bad++; continue; }
       push(date, Math.abs(v), desc, (m.negSign ? v < 0 : v > 0) ? 'expense' : 'income');
@@ -169,5 +171,5 @@ export function toTransactions({ headers, rows }, format, mapping) {
   return { rows: out, dropped };
 }
 
-/** Есть ли в колонке отрицательные числа — тогда расходы, скорее всего, со знаком минус. */
+/** Whether the column has negative numbers — then expenses most likely have a minus sign. */
 export const hasNegatives = (rows, col) => col >= 0 && rows.some((r) => parseAmount(r[col]) < 0);

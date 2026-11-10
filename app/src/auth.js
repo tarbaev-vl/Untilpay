@@ -7,16 +7,16 @@ const sha = (s) => createHash('sha256').update(String(s)).digest();
 const passwordOk = (given, expected) => timingSafeEqual(sha(given), sha(expected));
 
 /**
- * Простая авторизация одним паролем (APP_PASSWORD).
- * Сессия — подписанная httpOnly-кука со сроком действия.
+ * Simple single-password auth (APP_PASSWORD).
+ * The session is a signed httpOnly cookie with an expiry time.
  */
-// Плагин без инкапсуляции: requireAuth виден всем маршрутам
+// A plugin without encapsulation: requireAuth is visible to all routes
 auth[Symbol.for('skip-override')] = true;
 
 export default async function auth(app) {
   const password = process.env.APP_PASSWORD || '';
   const secure = process.env.COOKIE_SECURE === 'true';
-  if (!password) app.log.warn('APP_PASSWORD не задан — вход без пароля!');
+  if (!password) app.log.warn('APP_PASSWORD is not set — the app is open without a password!');
 
   const isAuthed = (req) => {
     if (!password) return true;
@@ -27,7 +27,7 @@ export default async function auth(app) {
   };
 
   app.decorate('requireAuth', async (req, reply) => {
-    if (!isAuthed(req)) return reply.code(401).send({ error: 'unauthorized', message: 'Нужно войти' });
+    if (!isAuthed(req)) return reply.code(401).send({ error: 'unauthorized', message: req.t('auth.required') });
   });
 
   app.post('/api/login', {
@@ -40,7 +40,7 @@ export default async function auth(app) {
     },
   }, async (req, reply) => {
     if (password && !passwordOk(req.body.password, password)) {
-      return reply.code(401).send({ error: 'bad_password', message: 'Неверный пароль' });
+      return reply.code(401).send({ error: 'bad_password', message: req.t('auth.bad_password') });
     }
     const exp = Date.now() + TTL_DAYS * 864e5;
     reply.setCookie(COOKIE, String(exp), {

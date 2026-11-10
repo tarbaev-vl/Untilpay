@@ -1,25 +1,28 @@
 import { parseCsv, detectFormat, guessMapping, toTransactions, hasNegatives } from '/csv.js';
 import { periodRange, periodOf, rangeLabel, dueDate } from '/period.js';
+import { t, tn, label, monthLabel, locale, lang, setLang, LANGS, applyDom } from '/i18n.js';
 
-const CATS = ['Жильё', 'Коммунальные', 'Связь и интернет', 'Продукты', 'Кафе и рестораны', 'Транспорт', 'Авто', 'Здоровье', 'Страховка', 'Кредиты', 'Подписки и сервисы', 'Образование', 'Дети', 'Одежда', 'Дом', 'Развлечения', 'Спорт', 'Путешествия', 'Подарки', 'Другое'];
-const ACCS = ['Bank of Cyprus', 'Revolut', 'Наличные', 'Другое'];
-const INC_SOURCES = ['Зарплата', 'Аванс', 'Премия', 'Фриланс', 'Аренда', 'Возврат', 'Проценты', 'Подарок', 'Другое'];
-const PERIOD = { month: { k: 1, t: 'в месяц' }, year: { k: 1 / 12, t: 'в год' }, quarter: { k: 1 / 3, t: 'в квартал' }, week: { k: 52 / 12, t: 'в неделю' } };
-const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+// Stored values: they are saved to the database as they are and translated only for display (label())
+const OTHER = 'Другое';
+
+const CATS = ['Жильё', 'Коммунальные', 'Связь и интернет', 'Продукты', 'Кафе и рестораны', 'Транспорт', 'Авто', 'Здоровье', 'Страховка', 'Кредиты', 'Подписки и сервисы', 'Образование', 'Дети', 'Одежда', 'Дом', 'Развлечения', 'Спорт', 'Путешествия', 'Подарки', OTHER];
+const ACCS = ['Bank of Cyprus', 'Revolut', 'Наличные', OTHER];
+const INC_SOURCES = ['Зарплата', 'Аванс', 'Премия', 'Фриланс', 'Аренда', 'Возврат', 'Проценты', 'Подарок', OTHER];
+const PERIOD = { month: { k: 1 }, year: { k: 1 / 12 }, quarter: { k: 1 / 3 }, week: { k: 52 / 12 } };
 
 const $ = (id) => document.getElementById(id);
-const eur = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
-const eur0 = new Intl.NumberFormat('ru-RU', { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
+const eur = new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const eur0 = new Intl.NumberFormat(locale, { style: 'currency', currency: 'EUR', maximumFractionDigits: 0 });
 const fmt = (n) => eur.format(Math.round((n || 0) * 100) / 100);
 const parseAmt = (s) => { const v = parseFloat(String(s).replace(/\s/g, '').replace(',', '.')); return Number.isFinite(v) ? Math.round(v * 100) / 100 : NaN; };
 const pad = (n) => String(n).padStart(2, '0');
 const today = () => { const d = new Date(); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
 const monthOf = (s) => s.slice(0, 7);
 const monthly = (r) => (r.amount || 0) * (PERIOD[r.period] || PERIOD.month).k;
-const monthLabel = (m) => { const [y, mm] = m.split('-'); return `${MONTHS[+mm - 1]} ${y}`; };
-const plural = (n, a, b, c) => { const m = n % 10, h = n % 100; return m === 1 && h !== 11 ? a : m >= 2 && m <= 4 && (h < 12 || h > 14) ? b : c; };
+// An income source is free text: a translated name of a standard source is saved as its stored value
+const canonSource = (v) => INC_SOURCES.find((x) => label(x).toLowerCase() === v.toLowerCase()) || v;
 
-const S = { rec: [], exp: [], inc: [], sources: [], editInc: null, income: 0, periodStart: 1, cat: null, month: monthOf(today()), editRec: null, editExp: null, kind: 'mandatory', loaded: false };
+const S = { ai: { configured: true, saved: null, busy: false, error: '', open: false }, rec: [], exp: [], inc: [], sources: [], editInc: null, income: 0, periodStart: 1, cat: null, acc: null, month: monthOf(today()), editRec: null, editExp: null, kind: 'mandatory', loaded: false };
 
 /* ---------- API ---------- */
 class ApiError extends Error { constructor(status, body) { super(body?.message || `HTTP ${status}`); this.status = status; this.body = body; } }
@@ -30,7 +33,7 @@ async function api(method, url, body) {
     body: body ? JSON.stringify(body) : undefined,
     credentials: 'same-origin',
   });
-  if (res.status === 401 && url !== '/api/login') { showLogin(); throw new ApiError(401, { message: 'Нужно войти' }); }
+  if (res.status === 401 && url !== '/api/login') { showLogin(); throw new ApiError(401, { message: t('err.auth') }); }
   if (res.status === 204) return null;
   const data = await res.json().catch(() => null);
   if (!res.ok) throw new ApiError(res.status, data);
@@ -38,41 +41,49 @@ async function api(method, url, body) {
 }
 async function write(fn, msg) {
   try { await fn(); if (msg) toast(msg); return true; }
-  catch (err) { if (err.status !== 401) toast(err.message || 'Не сохранилось. Проверьте связь.'); return false; }
+  catch (err) { if (err.status !== 401) toast(err.message || t('err.save')); return false; }
 }
 
-/* ---------- загрузка ---------- */
+/* ---------- loading ---------- */
 async function loadRec() { S.rec = await api('GET', '/api/recurring'); }
 const periodQs = () => { const r = periodRange(S.month, S.periodStart); return `from=${r.from}&to=${r.to}`; };
-// linked=1: сервер добавит оплаты регулярных платежей рядом с периодом — их могли внести заранее или с опозданием
+// linked=1: the server adds recurring payments made close to the period — they may have been paid early or late
 async function loadExp() {
   const [exp, inc] = await Promise.all([api('GET', `/api/expenses?${periodQs()}&linked=1`), api('GET', `/api/incomes?${periodQs()}`)]);
   S.exp = exp; S.inc = inc;
+  await loadInsights();
 }
-// Подсказки источников дохода: стандартные и уже использованные
+const aiStatus = (r) => ({ configured: r.configured, provider: r.provider, model: r.model, local: r.local, cfgError: r.error });
+// Saved AI advice for the current period; an error here must not break loading the expenses
+async function loadInsights() {
+  const { from, to } = periodRange(S.month, S.periodStart);
+  try { const r = await api('GET', `/api/insights?from=${from}&to=${to}`); Object.assign(S.ai, aiStatus(r), { saved: r.saved, error: '' }); }
+  catch (err) { if (err.status === 401) throw err; S.ai.saved = null; }
+}
+// Income source suggestions: the standard ones and those already used
 async function loadSources() {
   S.sources = await api('GET', '/api/incomes/sources');
   const dl = $('incSources'); dl.innerHTML = '';
-  [...new Set([...S.sources, ...INC_SOURCES])].forEach((v) => { const o = document.createElement('option'); o.value = v; dl.appendChild(o); });
+  [...new Set([...S.sources, ...INC_SOURCES].map(label))].forEach((v) => { const o = document.createElement('option'); o.value = v; dl.appendChild(o); });
 }
 async function loadSettings() { const st = await api('GET', '/api/settings'); S.income = st.income || 0; S.periodStart = st.periodStart || 1; }
 async function loadAll() {
   try {
     await loadSettings();
-    if (!S.loaded) S.month = periodOf(today(), S.periodStart); // период зависит от дня начала месяца
+    if (!S.loaded) S.month = periodOf(today(), S.periodStart); // the period depends on the day the month starts
     await Promise.all([loadRec(), loadExp(), loadSources()]); S.loaded = true; $('banner').hidden = true;
   }
-  catch (err) { if (err.status !== 401) { const b = $('banner'); b.hidden = false; b.textContent = 'Не удалось загрузить данные с сервера. Проверьте, что контейнеры запущены.'; } }
+  catch (err) { if (err.status !== 401) { const b = $('banner'); b.hidden = false; b.textContent = t('banner.load_failed'); } }
   render();
 }
 
 /* ---------- UI helpers ---------- */
-function fillSelect(sel, arr, val) { sel.innerHTML = ''; arr.forEach((a) => { const o = document.createElement('option'); o.value = a; o.textContent = a; sel.appendChild(o); }); if (val) sel.value = val; }
+function fillSelect(sel, arr, val) { sel.innerHTML = ''; arr.forEach((a) => { const o = document.createElement('option'); o.value = a; o.textContent = label(a); sel.appendChild(o); }); if (val) sel.value = val; }
 function el(tag, cls, text) { const e = document.createElement(tag); if (cls) e.className = cls; if (text != null) e.textContent = text; return e; }
-function toast(t) { const e = $('toast'); e.textContent = t; e.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { e.hidden = true; }, 2400); }
+function toast(text) { const e = $('toast'); e.textContent = text; e.hidden = false; clearTimeout(toast._t); toast._t = setTimeout(() => { e.hidden = true; }, 2400); }
 function confirmBtn(btn, fn) {
   if (btn.dataset.armed) { fn(); return; }
-  btn.dataset.armed = '1'; const old = btn.textContent; btn.textContent = 'Точно?'; btn.classList.add('danger');
+  btn.dataset.armed = '1'; const old = btn.textContent; btn.textContent = t('common.sure'); btn.classList.add('danger');
   setTimeout(() => { delete btn.dataset.armed; btn.textContent = old; btn.classList.remove('danger'); }, 3000);
 }
 function setKind(v) {
@@ -80,9 +91,9 @@ function setKind(v) {
   if (v === 'subscription' && $('rCat').value === 'Жильё') $('rCat').value = 'Подписки и сервисы';
 }
 
-/* ---------- регулярные платежи и их оплаты ---------- */
-// Расход со ссылкой на регулярный платёж закрывает этот платёж и не входит в «Расходы»
-// Оплата засчитывается за ближайшую дату списания (или за месяц, выбранный вручную), а не за дату расхода
+/* ---------- recurring payments and their payments ---------- */
+// An expense linked to a recurring payment settles that payment and does not count towards "Expenses"
+// A payment counts for the nearest charge date (or the manually chosen month), not for the expense date
 const coverPeriod = (e, r) => periodOf(dueDate(e.date, r.day, e.for_month, r.period === 'month'), S.periodStart);
 function ledger() {
   const byId = new Map(S.rec.map((r) => [r.id, r]));
@@ -92,21 +103,21 @@ function ledger() {
   S.exp.forEach((e) => {
     const inRange = e.date >= from && e.date < to; const c = cover(e);
     if (c === S.month) (paid[e.recurring_id] = paid[e.recurring_id] || []).push(e);
-    // траты периода: по дате, а оплаты регулярных — за период, к которому относится их дата списания
+    // period expenses: by date, and recurring payments — by the period their charge date belongs to
     if (c ? c === S.month : inRange) listed.push(e);
   });
   const paidSum = (r) => (paid[r.id] || []).reduce((s, e) => s + (e.amount || 0), 0);
-  // тип связанного регулярного платежа — для разбивки трат на обязательные, подписки и прочие
+  // kind of the linked recurring payment — to split spending into mandatory, subscriptions and other
   const kindOf = (e) => { const r = cover(e) === S.month && byId.get(e.recurring_id); return r ? (r.kind === 'subscription' ? 'subscription' : 'mandatory') : null; };
-  // справочно: ежемесячные активные платежи, ещё не оплаченные в этом периоде
+  // for reference: active monthly payments not yet paid in this period
   const pending = S.rec.filter((r) => r.active !== false && r.period === 'month' && !paid[r.id]);
   return { byId, paid, paidSum, listed, cover, kindOf, pending };
 }
 const shortDate = (d) => `${d.slice(8, 10)}.${d.slice(5, 7)}`;
 function fillRecSelect(sel, val, none = '—') {
   sel.innerHTML = ''; const o = el('option', null, none); o.value = ''; sel.appendChild(o);
-  [...S.rec].sort((a, b) => a.name.localeCompare(b.name, 'ru')).forEach((r) => {
-    const x = el('option', null, r.active === false ? `${r.name} (пауза)` : r.name); x.value = r.id; sel.appendChild(x);
+  [...S.rec].sort((a, b) => a.name.localeCompare(b.name, lang)).forEach((r) => {
+    const x = el('option', null, r.active === false ? t('rec.paused_opt', { name: r.name }) : r.name); x.value = r.id; sel.appendChild(x);
   });
   sel.value = val || '';
 }
@@ -114,9 +125,9 @@ function fillRecSelect(sel, val, none = '—') {
 /* ---------- render ---------- */
 function render() {
   $('monthLabel').textContent = monthLabel(S.month);
-  $('periodLabel').hidden = S.periodStart <= 1; $('periodLabel').textContent = rangeLabel(S.month, S.periodStart);
+  $('periodLabel').hidden = S.periodStart <= 1; $('periodLabel').textContent = rangeLabel(S.month, S.periodStart, locale);
   $('csvLink').href = `/api/expenses.csv?${periodQs()}`;
-  // Итоги — только фактические траты; регулярные платежи — справочник, на который ссылаются расходы
+  // Totals are actual spending only; recurring payments are a reference list that expenses link to
   const L = ledger();
   const active = S.rec.filter((r) => r.active !== false);
   const sumOf = (arr) => arr.reduce((s, e) => s + (e.amount || 0), 0);
@@ -126,31 +137,31 @@ function render() {
   const vari = total - mand - subs;
   if (document.activeElement !== $('eRec')) fillRecSelect($('eRec'), $('eRec').value);
 
-  // «оплачено 2 из 3 · план 2 785 € / мес» по активным платежам типа
+  // "paid 2 of 3 · plan €2,785 / mo" for the active payments of a kind
   const recInfo = (kind) => {
     const rs = active.filter((r) => (r.kind === 'subscription' ? 'subscription' : 'mandatory') === kind);
-    if (!rs.length) return 'нет регулярных платежей';
+    if (!rs.length) return t('tile.no_recurring');
     const plan = rs.reduce((s, r) => s + monthly(r), 0);
-    return `оплачено ${rs.filter((r) => L.paid[r.id]).length} из ${rs.length} · план ${eur0.format(plan)} / мес`;
+    return t('tile.paid_of', { paid: rs.filter((r) => L.paid[r.id]).length, total: rs.length, plan: eur0.format(plan) });
   };
   $('tMand').textContent = fmt(mand); $('tMandSub').textContent = recInfo('mandatory');
   $('tSubs').textContent = fmt(subs); $('tSubsSub').textContent = recInfo('subscription');
-  $('tVar').textContent = fmt(total); $('tVarSub').textContent = `${L.listed.length} ${plural(L.listed.length, 'запись', 'записи', 'записей')}`;
+  $('tVar').textContent = fmt(total); $('tVarSub').textContent = tn('tile.entries', L.listed.length);
   if (document.activeElement !== $('income')) $('income').value = S.income ? String(S.income).replace('.', ',') : '';
   if (document.activeElement !== $('pstart')) $('pstart').value = String(S.periodStart);
-  // доход: факт за период, а пока ничего не внесено — план
+  // income: actual for the period, or the plan until something is entered
   const incFact = S.inc.reduce((s, i) => s + (i.amount || 0), 0);
   const incBase = incFact > 0 ? incFact : S.income || 0;
   $('tRest').textContent = fmt(incBase - total);
-  $('tIncFact').textContent = incFact > 0 ? `Получено ${fmt(incFact)}${S.income ? ` · план ${fmt(S.income)}` : ''}`
-    : S.income ? 'Доходы не внесены — считаем от плана' : 'Доходы не внесены';
+  $('tIncFact').textContent = incFact > 0 ? t('tile.received', { sum: fmt(incFact) }) + (S.income ? t('tile.plan_suffix', { sum: fmt(S.income) }) : '')
+    : t(S.income ? 'tile.no_income_plan' : 'tile.no_income');
   const expected = L.pending.reduce((s, r) => s + monthly(r), 0);
   $('tExpected').hidden = !expected;
-  $('tExpected').textContent = expected ? `ещё ожидается ${fmt(expected)} регулярных` : '';
+  $('tExpected').textContent = expected ? t('tile.expected', { sum: fmt(expected) }) : '';
   $('tExpected').title = L.pending.map((r) => `${r.name}: ${fmt(monthly(r))}`).join('\n');
 
   const base = Math.max(incBase, total) || 1;
-  const parts = [['Обязательные', mand, 'var(--mand)'], ['Подписки', subs, 'var(--subs)'], ['Прочие расходы', vari, 'var(--var)']];
+  const parts = [[t('tile.mandatory'), mand, 'var(--mand)'], [t('tile.subs'), subs, 'var(--subs)'], [t('load.other'), vari, 'var(--var)']];
   $('stack').innerHTML = '';
   parts.forEach(([n, v, c]) => { const i = el('i'); i.style.width = `${(v / base) * 100}%`; i.style.background = c; i.title = `${n}: ${fmt(v)}`; $('stack').appendChild(i); });
   $('legend').innerHTML = '';
@@ -160,47 +171,127 @@ function render() {
     $('legend').appendChild(s);
   });
   if (incBase) {
-    const s = el('span'); s.append(incFact > 0 ? 'Доход (факт) ' : 'Доход (план) '); s.appendChild(el('b', 'num', fmt(incBase)));
-    s.append(` · занято ${Math.round((total / incBase) * 100)}%`); $('legend').appendChild(s);
+    const s = el('span'); s.append(`${t(incFact > 0 ? 'load.income_fact' : 'load.income_plan')} `); s.appendChild(el('b', 'num', fmt(incBase)));
+    s.append(` · ${t('load.used', { pct: Math.round((total / incBase) * 100) })}`); $('legend').appendChild(s);
   }
 
   renderRec(active.length, L);
   renderCats(L.listed, L.kindOf);
-  // фильтр по категории действует только на список расходов, итоги считаются по всем
-  const shown = S.cat ? L.listed.filter((e) => (e.category || 'Другое') === S.cat) : L.listed;
+  // the category filter applies only to the expense list, totals cover everything
+  const byCat = S.cat ? L.listed.filter((e) => (e.category || OTHER) === S.cat) : L.listed;
+  renderAccs(byCat);
+  const shown = S.acc ? byCat.filter((e) => (e.account || OTHER) === S.acc) : byCat;
   $('catReset').hidden = !S.cat;
   renderExp(shown, L, total);
   renderInc(incFact);
+  renderInsights();
 }
+
+/* ---------- AI advice ---------- */
+const PRIO = { high: ['ai.prio_high', 'var(--bad)'], medium: ['ai.prio_medium', 'var(--var)'], low: ['ai.prio_low', 'var(--muted)'] };
+function renderInsights() {
+  const B = $('aiBody'); B.innerHTML = '';
+  const { configured, saved, busy, error, provider, local, cfgError, open } = S.ai;
+  // the panel is collapsed by default; the header shows a short summary
+  B.hidden = !open; $('aiPanel').classList.toggle('collapsed', !open); $('aiToggle').setAttribute('aria-expanded', String(open));
+  $('aiRun').disabled = busy || !configured;
+  $('aiRun').textContent = t(busy ? 'ai.busy' : saved ? 'ai.refresh' : 'ai.get');
+  const when = (opts) => new Date(saved.created_at).toLocaleString(locale, opts);
+  if (open) {
+    $('aiMeta').textContent = saved ? `${t('ai.updated', { when: when({ day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) })} · ${saved.model}`
+      : provider ? `${provider} · ${S.ai.model}` : '';
+  } else if (!configured) $('aiMeta').textContent = t('ai.not_configured');
+  else if (busy) $('aiMeta').textContent = '';
+  else if (!saved) $('aiMeta').textContent = t('ai.never');
+  else {
+    const n = saved.result.recommendations.length, sv = saved.result.savings_potential;
+    $('aiMeta').textContent = [sv > 0 ? `≈ ${t('ai.per_month', { sum: eur0.format(sv) })}` : null, tn('ai.tips', n),
+      t('ai.updated', { when: when({ day: 'numeric', month: 'short' }) })].filter(Boolean).join(' · ');
+  }
+  if (!configured) {
+    if (cfgError) B.appendChild(el('div', 'ai-error', cfgError));
+    B.appendChild(el('div', 'empty', t('ai.setup')));
+    return;
+  }
+  if (error) B.appendChild(el('div', 'ai-error', error));
+  if (!saved) {
+    if (!busy) {
+      const where = local ? t('ai.local') : t('ai.remote', { provider });
+      B.appendChild(el('div', 'empty', t('ai.intro', { provider, month: monthLabel(S.month, true), where })));
+    }
+    return;
+  }
+  const r = saved.result;
+  B.appendChild(el('p', 'ai-summary', r.summary));
+  if (r.savings_potential > 0) {
+    const p = el('div', 'ai-saving'); p.append(t('ai.can_save')); p.appendChild(el('b', 'num', t('ai.per_month', { sum: eur0.format(r.savings_potential) }))); B.appendChild(p);
+  }
+  const order = { high: 0, medium: 1, low: 2 };
+  [...r.recommendations].sort((a, b) => order[a.priority] - order[b.priority] || b.saving_per_month - a.saving_per_month).forEach((x) => {
+    const [prio, color] = PRIO[x.priority] || PRIO.low;
+    const c = el('div', 'ai-card'); c.style.borderLeftColor = color;
+    const h = el('div', 'ai-card-h');
+    h.append(el('b', null, x.title));
+    if (x.saving_per_month > 0) h.append(el('span', 'num ai-minus', t('ai.minus_per_month', { sum: eur0.format(x.saving_per_month) })));
+    c.appendChild(h);
+    const meta = el('div', 'ai-card-meta'); const chip = el('span', 'chip', t(prio)); chip.style.color = color; meta.append(chip, label(x.category));
+    c.append(meta, el('div', 'ai-card-d', x.detail));
+    B.appendChild(c);
+  });
+  [[r.positives, t('ai.positives')], [r.warnings, t('ai.warnings')]].forEach(([items, title]) => {
+    if (!items?.length) return;
+    B.appendChild(el('div', 'eyebrow ai-h', title));
+    const ul = el('ul', 'ai-list'); items.forEach((x) => ul.appendChild(el('li', null, x))); B.appendChild(ul);
+  });
+}
+$('aiToggle').onclick = () => { S.ai.open = !S.ai.open; renderInsights(); };
+$('aiRun').onclick = async () => {
+  // the current month and the three previous ones — for comparison
+  const periods = [0, -1, -2, -3].map((k) => {
+    const [y, m] = S.month.split('-').map(Number); const dt = new Date(y, m - 1 + k, 1);
+    const id = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`; const { from, to } = periodRange(id, S.periodStart);
+    return { label: id, from, to };
+  });
+  const month = S.month;
+  Object.assign(S.ai, { busy: true, error: '', open: true }); renderInsights();
+  try {
+    const r = await api('POST', '/api/insights', { periods });
+    if (S.month === month) Object.assign(S.ai, aiStatus(r), { saved: r.saved });
+  } catch (err) {
+    if (err.status !== 401) S.ai.error = err.message || t('ai.failed');
+    if (err.status === 503) S.ai.configured = false;
+  }
+  S.ai.busy = false; renderInsights();
+};
 
 function renderRec(nActive, led) {
   const L = $('recList'); L.innerHTML = '';
-  $('recMeta').textContent = `${nActive} ${plural(nActive, 'активный', 'активных', 'активных')}`;
-  if (!S.rec.length) { L.appendChild(el('div', 'empty', S.loaded ? 'Добавьте аренду, коммуналку, подписки — затем связывайте с ними расходы, чтобы видеть, что оплачено.' : 'Загрузка…')); return; }
-  [['mandatory', 'Обязательные', 'var(--mand)'], ['subscription', 'Подписки', 'var(--subs)']].forEach(([k, title, color]) => {
+  $('recMeta').textContent = tn('rec.active', nActive);
+  if (!S.rec.length) { L.appendChild(el('div', 'empty', S.loaded ? t('rec.empty') : t('common.loading'))); return; }
+  [['mandatory', t('tile.mandatory'), 'var(--mand)'], ['subscription', t('tile.subs'), 'var(--subs)']].forEach(([k, title, color]) => {
     const items = S.rec.filter((r) => (r.kind === 'subscription' ? 'subscription' : 'mandatory') === k)
       .sort((a, b) => (b.active !== false) - (a.active !== false) || monthly(b) - monthly(a));
     if (!items.length) return;
-    const plan = items.filter((r) => r.active !== false).reduce((s, r) => s + monthly(r), 0); // справочно
-    const gh = el('div', 'group-h'); gh.append(el('span', null, title), el('span', 'num', `план ${fmt(plan)} / мес`)); L.appendChild(gh);
+    const plan = items.filter((r) => r.active !== false).reduce((s, r) => s + monthly(r), 0); // for reference
+    const gh = el('div', 'group-h'); gh.append(el('span', null, title), el('span', 'num', t('rec.plan', { sum: fmt(plan) }))); L.appendChild(gh);
     items.forEach((r) => {
       const it = el('div', `item${r.active === false ? ' off' : ''}`);
       const bar = el('span', 'bar'); bar.style.background = color; it.appendChild(bar);
-      const nm = el('div', 'name', r.name); if (r.active === false) nm.appendChild(el('span', 'chip', 'на паузе')); it.appendChild(nm);
+      const nm = el('div', 'name', r.name); if (r.active === false) nm.appendChild(el('span', 'chip', t('rec.paused_chip'))); it.appendChild(nm);
       const a = el('div', 'amt', fmt(r.amount));
-      a.appendChild(el('small', null, r.period !== 'month' ? `${PERIOD[r.period].t} · ${fmt(monthly(r))}/мес` : 'в месяц'));
+      a.appendChild(el('small', null, r.period !== 'month' ? t('rec.monthly_equiv', { period: t(`period.${r.period}`), sum: fmt(monthly(r)) }) : t('period.month')));
       it.appendChild(a);
       const ops = el('div', 'ops');
-      const e = el('button', 'op', 'Изм.'); e.type = 'button'; e.onclick = () => editRec(r);
-      const p = el('button', 'op', r.active === false ? 'Вкл.' : 'Пауза'); p.type = 'button';
+      const e = el('button', 'op', t('common.edit')); e.type = 'button'; e.onclick = () => editRec(r);
+      const p = el('button', 'op', t(r.active === false ? 'rec.resume' : 'rec.pause')); p.type = 'button';
       p.onclick = () => write(async () => { await api('PATCH', `/api/recurring/${r.id}`, { active: r.active === false }); await loadRec(); render(); });
-      const d = el('button', 'op', 'Удал.'); d.type = 'button';
-      d.onclick = () => confirmBtn(d, () => write(async () => { await api('DELETE', `/api/recurring/${r.id}`); await loadRec(); render(); }, 'Удалено'));
+      const d = el('button', 'op', t('common.delete')); d.type = 'button';
+      d.onclick = () => confirmBtn(d, () => write(async () => { await api('DELETE', `/api/recurring/${r.id}`); await loadRec(); render(); }, t('common.deleted')));
       ops.append(e, p, d); it.appendChild(ops);
-      const det = [r.category, r.account]; if (r.day) det.push(`списание ${r.day}-го`);
+      const det = [label(r.category), label(r.account)]; if (r.day) det.push(t('rec.charge_day', { day: r.day }));
       const ps = led.paid[r.id];
-      if (ps) det.push(`оплачено ${ps.map((x) => shortDate(x.date)).join(', ')} · ${fmt(led.paidSum(r))}`);
-      else if (r.period === 'month' && r.active !== false) det.push('ещё не списан');
+      if (ps) det.push(t('rec.paid_on', { dates: ps.map((x) => shortDate(x.date)).join(', '), sum: fmt(led.paidSum(r)) }));
+      else if (r.period === 'month' && r.active !== false) det.push(t('rec.not_charged'));
       it.appendChild(el('div', 'det', det.filter(Boolean).join(' · ')));
       L.appendChild(it);
     });
@@ -209,21 +300,36 @@ function renderRec(nActive, led) {
 
 function renderCats(listed, kindOf) {
   const C = $('cats'); C.innerHTML = ''; C.classList.toggle('filtered', Boolean(S.cat)); const m = {};
-  // f — оплаты регулярных платежей, v — прочие траты
-  listed.forEach((e) => { const c = e.category || 'Другое'; (m[c] = m[c] || { f: 0, v: 0 })[kindOf(e) ? 'f' : 'v'] += e.amount || 0; });
+  // f — recurring payments, v — other spending
+  listed.forEach((e) => { const c = e.category || OTHER; (m[c] = m[c] || { f: 0, v: 0 })[kindOf(e) ? 'f' : 'v'] += e.amount || 0; });
   const rows = Object.entries(m).map(([k, v]) => [k, v.f, v.v, v.f + v.v]).sort((a, b) => b[3] - a[3]);
-  if (!rows.length) { C.appendChild(el('div', 'empty', 'Здесь появится разбивка по категориям.')); return; }
+  if (!rows.length) { C.appendChild(el('div', 'empty', t('exp.cats_empty'))); return; }
   const max = rows[0][3] || 1;
-  rows.forEach(([k, f, v, t]) => {
+  rows.forEach(([k, f, v, sum]) => {
     const r = el('button', `cat${S.cat === k ? ' on' : ''}`); r.type = 'button'; r.setAttribute('aria-pressed', String(S.cat === k));
-    r.title = S.cat === k ? 'Показать все расходы' : `Показать только «${k}»`;
+    r.title = S.cat === k ? t('exp.cat_show_all') : t('exp.cat_only', { name: label(k) });
     r.onclick = () => { S.cat = S.cat === k ? null : k; render(); };
-    r.appendChild(el('span', 'lbl', k));
+    r.appendChild(el('span', 'lbl', label(k)));
     const tr = el('div', 'track');
-    const a = el('i'); a.style.width = `${(f / max) * 100}%`; a.style.background = 'var(--mand)'; a.title = `Оплаты регулярных: ${fmt(f)}`;
-    const b = el('i'); b.style.width = `${(v / max) * 100}%`; b.style.background = 'var(--var)'; b.title = `Прочие расходы: ${fmt(v)}`;
-    tr.append(a, b); r.appendChild(tr); r.appendChild(el('span', 'v', fmt(t))); C.appendChild(r);
+    const a = el('i'); a.style.width = `${(f / max) * 100}%`; a.style.background = 'var(--mand)'; a.title = t('exp.bar_recurring', { sum: fmt(f) });
+    const b = el('i'); b.style.width = `${(v / max) * 100}%`; b.style.background = 'var(--var)'; b.title = t('exp.bar_other', { sum: fmt(v) });
+    tr.append(a, b); r.appendChild(tr); r.appendChild(el('span', 'v', fmt(sum))); C.appendChild(r);
   });
+}
+
+// Account filter above the list: sums respect the selected category
+function renderAccs(list) {
+  const A = $('accs'); A.innerHTML = '';
+  const by = {}; list.forEach((e) => { const a = e.account || OTHER; by[a] = (by[a] || 0) + (e.amount || 0); });
+  if (S.acc && !(S.acc in by)) by[S.acc] = 0; // the selected account with no spending — so that the selection can be cleared
+  const rows = Object.entries(by).sort((a, b) => b[1] - a[1]);
+  A.hidden = !rows.length;
+  const chip = (name, sum, on, onclick) => {
+    const b = el('button', 'op acc'); b.type = 'button'; b.setAttribute('aria-pressed', String(on));
+    b.append(`${name} · `); b.appendChild(el('span', 'num', eur0.format(sum))); b.onclick = onclick; A.appendChild(b);
+  };
+  chip(t('common.all'), list.reduce((s, e) => s + (e.amount || 0), 0), !S.acc, () => { S.acc = null; render(); });
+  rows.forEach(([a, sum]) => chip(label(a), sum, S.acc === a, () => { S.acc = S.acc === a ? null : a; render(); }));
 }
 
 function renderExp(exp, led, all) {
@@ -231,33 +337,36 @@ function renderExp(exp, led, all) {
   const recOf = (e) => (e.recurring_id && led.byId.get(e.recurring_id)) || null;
   const sumOf = (arr) => arr.reduce((s, e) => s + (e.amount || 0), 0);
   const total = sumOf(exp);
-  $('expMeta').textContent = S.cat ? `«${S.cat}» · ${fmt(total)} из ${fmt(all)}` : `${monthLabel(S.month)} · ${fmt(total)}`;
+  const filters = [S.cat ? t('common.quoted', { name: label(S.cat) }) : null, S.acc ? label(S.acc) : null].filter(Boolean);
+  $('expMeta').textContent = filters.length ? t('exp.meta_filtered', { filters: filters.join(' · '), sum: fmt(total), all: fmt(all) }) : `${monthLabel(S.month)} · ${fmt(total)}`;
   if (!exp.length) {
-    const msg = S.cat ? `В категории «${S.cat}» за ${monthLabel(S.month).toLowerCase()} расходов нет.`
-      : `За ${monthLabel(S.month).toLowerCase()} расходов пока нет. Внесите первую трату в форму выше.`;
-    L.appendChild(el('div', 'empty', S.loaded ? msg : 'Загрузка…')); return;
+    const month = monthLabel(S.month, true);
+    const msg = filters.length ? t('exp.none_filtered', {
+      acc: S.acc ? t('exp.none_acc', { name: label(S.acc) }) : '', cat: S.cat ? t('exp.none_cat', { name: label(S.cat) }) : '', month,
+    }) : t('exp.none', { month });
+    L.appendChild(el('div', 'empty', S.loaded ? msg : t('common.loading'))); return;
   }
   const by = {}; exp.forEach((e) => (by[e.date] = by[e.date] || []).push(e));
   Object.keys(by).sort().reverse().forEach((d) => {
     const items = by[d]; const sum = items.reduce((s, e) => s + (e.amount || 0), 0);
     const gh = el('div', 'group-h');
-    gh.append(el('span', null, new Date(`${d}T12:00:00`).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })), el('span', 'num', fmt(sum)));
+    gh.append(el('span', null, new Date(`${d}T12:00:00`).toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'long' })), el('span', 'num', fmt(sum)));
     L.appendChild(gh);
     items.forEach((e) => {
       const rr = recOf(e);
       const it = el('div', 'item'); const bar = el('span', 'bar');
       bar.style.background = rr ? (rr.kind === 'subscription' ? 'var(--subs)' : 'var(--mand)') : 'var(--var)'; it.appendChild(bar);
-      it.appendChild(el('div', 'name', e.note || e.category));
+      it.appendChild(el('div', 'name', e.note || label(e.category)));
       it.appendChild(el('div', 'amt', fmt(e.amount)));
       const ops = el('div', 'ops');
-      const ed = el('button', 'op', 'Изм.'); ed.type = 'button'; ed.onclick = () => editExp(e);
-      const del = el('button', 'op', 'Удал.'); del.type = 'button';
-      del.onclick = () => confirmBtn(del, () => write(async () => { await api('DELETE', `/api/expenses/${e.id}`); await loadExp(); render(); }, 'Удалено'));
+      const ed = el('button', 'op', t('common.edit')); ed.type = 'button'; ed.onclick = () => editExp(e);
+      const del = el('button', 'op', t('common.delete')); del.type = 'button';
+      del.onclick = () => confirmBtn(del, () => write(async () => { await api('DELETE', `/api/expenses/${e.id}`); await loadExp(); render(); }, t('common.deleted')));
       ops.append(ed, del); it.appendChild(ops);
-      const orig = e.original && e.original !== e.note ? `из выписки: ${e.original}` : null;
+      const orig = e.original && e.original !== e.note ? t('import.from_statement', { text: e.original }) : null;
       const c = rr ? led.cover(e) : null;
-      const forLbl = c && c !== periodOf(e.date, S.periodStart) ? `за ${monthLabel(c).toLowerCase()}` : null;
-      it.appendChild(el('div', 'det', [e.note ? e.category : null, e.account, rr ? `регулярный: ${rr.name}` : null, forLbl, orig].filter(Boolean).join(' · ')));
+      const forLbl = c && c !== periodOf(e.date, S.periodStart) ? t('exp.for', { month: monthLabel(c, true) }) : null;
+      it.appendChild(el('div', 'det', [e.note ? label(e.category) : null, label(e.account), rr ? t('exp.recurring', { name: rr.name }) : null, forLbl, orig].filter(Boolean).join(' · ')));
       L.appendChild(it);
     });
   });
@@ -266,50 +375,50 @@ function renderExp(exp, led, all) {
 function renderInc(total) {
   const L = $('incList'); L.innerHTML = '';
   $('incMeta').textContent = `${monthLabel(S.month)} · +${fmt(total)}`;
-  // по источникам: «Зарплата 3 000 € · Фриланс 350 €»
+  // by source: "Salary €3,000 · Freelance €350"
   const by = {}; S.inc.forEach((i) => { by[i.source] = (by[i.source] || 0) + (i.amount || 0); });
   const src = Object.entries(by).sort((a, b) => b[1] - a[1]);
   $('incBySrc').hidden = !src.length;
-  $('incBySrc').textContent = src.length ? `По источникам: ${src.map(([k, v]) => `${k} ${fmt(v)}`).join(' · ')}` : '';
-  if (!S.inc.length) { L.appendChild(el('div', 'empty', S.loaded ? `За ${monthLabel(S.month).toLowerCase()} доходов пока нет. Пока их нет, остаток считается от плана.` : 'Загрузка…')); return; }
+  $('incBySrc').textContent = src.length ? t('inc.by_source', { list: src.map(([k, v]) => `${label(k)} ${fmt(v)}`).join(' · ') }) : '';
+  if (!S.inc.length) { L.appendChild(el('div', 'empty', S.loaded ? t('inc.empty', { month: monthLabel(S.month, true) }) : t('common.loading'))); return; }
   const byDate = {}; S.inc.forEach((i) => (byDate[i.date] = byDate[i.date] || []).push(i));
   Object.keys(byDate).sort().reverse().forEach((d) => {
-    const items = byDate[d]; const sum = items.reduce((t, i) => t + (i.amount || 0), 0);
+    const items = byDate[d]; const sum = items.reduce((a, i) => a + (i.amount || 0), 0);
     const gh = el('div', 'group-h');
-    gh.append(el('span', null, new Date(`${d}T12:00:00`).toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'long' })), el('span', 'num', `+${fmt(sum)}`));
+    gh.append(el('span', null, new Date(`${d}T12:00:00`).toLocaleDateString(locale, { weekday: 'short', day: 'numeric', month: 'long' })), el('span', 'num', `+${fmt(sum)}`));
     L.appendChild(gh);
     items.forEach((i) => {
       const it = el('div', 'item'); const bar = el('span', 'bar'); bar.style.background = 'var(--good)'; it.appendChild(bar);
-      it.appendChild(el('div', 'name', i.note || i.source));
+      it.appendChild(el('div', 'name', i.note || label(i.source)));
       it.appendChild(el('div', 'amt plus', `+${fmt(i.amount)}`));
       const ops = el('div', 'ops');
-      const ed = el('button', 'op', 'Изм.'); ed.type = 'button'; ed.onclick = () => editInc(i);
-      const del = el('button', 'op', 'Удал.'); del.type = 'button';
-      del.onclick = () => confirmBtn(del, () => write(async () => { await api('DELETE', `/api/incomes/${i.id}`); await loadExp(); render(); }, 'Удалено'));
+      const ed = el('button', 'op', t('common.edit')); ed.type = 'button'; ed.onclick = () => editInc(i);
+      const del = el('button', 'op', t('common.delete')); del.type = 'button';
+      del.onclick = () => confirmBtn(del, () => write(async () => { await api('DELETE', `/api/incomes/${i.id}`); await loadExp(); render(); }, t('common.deleted')));
       ops.append(ed, del); it.appendChild(ops);
-      const orig = i.original && i.original !== i.note ? `из выписки: ${i.original}` : null;
-      it.appendChild(el('div', 'det', [i.note ? i.source : null, i.account, orig].filter(Boolean).join(' · ')));
+      const orig = i.original && i.original !== i.note ? t('import.from_statement', { text: i.original }) : null;
+      it.appendChild(el('div', 'det', [i.note ? label(i.source) : null, label(i.account), orig].filter(Boolean).join(' · ')));
       L.appendChild(it);
     });
   });
 }
 
-/* ---------- регулярные платежи ---------- */
+/* ---------- recurring payments ---------- */
 function resetRec() {
   S.editRec = null; $('recForm').reset(); setKind('mandatory'); $('rCat').value = 'Жильё'; $('rAcc').value = 'Bank of Cyprus';
-  $('rSubmit').textContent = 'Добавить платёж'; $('rCancel').hidden = true; $('rHint').textContent = '';
+  $('rSubmit').textContent = t('rec.add'); $('rCancel').hidden = true; $('rHint').textContent = '';
 }
 function editRec(r) {
   S.editRec = r; $('rName').value = r.name; $('rAmt').value = String(r.amount).replace('.', ','); $('rPeriod').value = r.period || 'month';
-  setKind(r.kind || 'mandatory'); $('rCat').value = r.category || 'Другое'; $('rAcc').value = r.account || 'Другое'; $('rDay').value = r.day || '';
-  $('rSubmit').textContent = 'Сохранить'; $('rCancel').hidden = false; $('rHint').textContent = `Редактирование: ${r.name}`; $('rName').focus();
+  setKind(r.kind || 'mandatory'); $('rCat').value = r.category || OTHER; $('rAcc').value = r.account || OTHER; $('rDay').value = r.day || '';
+  $('rSubmit').textContent = t('common.save'); $('rCancel').hidden = false; $('rHint').textContent = t('rec.editing', { name: r.name }); $('rName').focus();
 }
 $('rCancel').onclick = resetRec;
 $('rKind').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) setKind(b.dataset.v); });
 $('recForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const amount = parseAmt($('rAmt').value);
-  if (!(amount > 0)) { $('rHint').textContent = 'Введите сумму больше нуля, например 12,99'; $('rAmt').focus(); return; }
+  if (!(amount > 0)) { $('rHint').textContent = t('rec.amount_hint'); $('rAmt').focus(); return; }
   const name = $('rName').value.trim(); if (!name) { $('rName').focus(); return; }
   const day = parseInt($('rDay').value, 10);
   const body = { name, amount, period: $('rPeriod').value, kind: S.kind, category: $('rCat').value, account: $('rAcc').value, day: day >= 1 && day <= 31 ? day : null };
@@ -318,39 +427,39 @@ $('recForm').addEventListener('submit', async (e) => {
     if (ed) await api('PUT', `/api/recurring/${ed.id}`, { ...body, active: ed.active !== false });
     else await api('POST', '/api/recurring', { ...body, active: true });
     await loadRec(); render();
-  }, ed ? 'Сохранено' : 'Платёж добавлен');
+  }, ed ? t('common.saved') : t('rec.added'));
   if (ok) resetRec();
 });
 
-/* ---------- расходы ---------- */
+/* ---------- expenses ---------- */
 function resetExp() {
   S.editExp = null; const keepDate = $('eDate').value, keepAcc = $('eAcc').value; $('expForm').reset();
   $('eDate').value = keepDate || today(); $('eAcc').value = keepAcc; $('eCat').value = 'Продукты'; $('eRec').value = ''; fillForSelect('');
-  $('eSubmit').textContent = 'Добавить расход'; $('eCancel').hidden = true; $('eHint').textContent = '';
+  $('eSubmit').textContent = t('exp.add'); $('eCancel').hidden = true; $('eHint').textContent = '';
 }
 function editExp(x) {
-  S.editExp = x; $('eAmt').value = String(x.amount).replace('.', ','); $('eCat').value = x.category || 'Другое'; $('eDate').value = x.date;
-  $('eNote').value = x.note || ''; $('eAcc').value = x.account || 'Другое'; $('eRec').value = x.recurring_id || ''; fillForSelect(x.for_month);
-  $('eSubmit').textContent = 'Сохранить'; $('eCancel').hidden = false; $('eHint').textContent = 'Редактирование расхода'; $('eAmt').focus();
+  S.editExp = x; $('eAmt').value = String(x.amount).replace('.', ','); $('eCat').value = x.category || OTHER; $('eDate').value = x.date;
+  $('eNote').value = x.note || ''; $('eAcc').value = x.account || OTHER; $('eRec').value = x.recurring_id || ''; fillForSelect(x.for_month);
+  $('eSubmit').textContent = t('common.save'); $('eCancel').hidden = false; $('eHint').textContent = t('exp.editing'); $('eAmt').focus();
 }
 $('eCancel').onclick = resetExp;
-// выбор регулярного платежа подставляет его категорию, счёт, а в пустые поля — название и сумму
-// «За месяц»: авто по ближайшей дате списания или вручную — прошлый, этот, следующий месяц от даты оплаты
+// choosing a recurring payment fills in its category and account, and the name and amount if those fields are empty
+// "For month": auto by the nearest charge date, or manual — the previous, this or the next month relative to the payment date
 function fillForSelect(val) {
   const r = S.rec.find((x) => x.id === $('eRec').value);
   $('eForWrap').hidden = !r; if (!r) return;
   const date = $('eDate').value || today();
   const target = (fm) => periodOf(dueDate(date, r.day, fm, r.period === 'month'), S.periodStart);
   const sel = $('eFor'); sel.innerHTML = '';
-  const add = (v, t) => { const o = el('option', null, t); o.value = v; sel.appendChild(o); };
-  add('', `Авто — ${monthLabel(target(null)).toLowerCase()}`);
+  const add = (v, text) => { const o = el('option', null, text); o.value = v; sel.appendChild(o); };
+  add('', t('exp.auto', { month: monthLabel(target(null), true) }));
   const seen = new Set(); const [y, m] = date.split('-').map(Number);
   [-1, 0, 1].forEach((k) => {
     const dt = new Date(y, m - 1 + k, 1); const fm = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`;
-    const p = target(fm); if (seen.has(p)) return; seen.add(p); add(fm, `за ${monthLabel(p).toLowerCase()}`);
+    const p = target(fm); if (seen.has(p)) return; seen.add(p); add(fm, t('exp.for', { month: monthLabel(p, true) }));
   });
   sel.value = val || '';
-  if (val && sel.value !== val) { add(val, `за ${monthLabel(target(val)).toLowerCase()}`); sel.value = val; }
+  if (val && sel.value !== val) { add(val, t('exp.for', { month: monthLabel(target(val), true) })); sel.value = val; }
 }
 $('eDate').addEventListener('change', () => fillForSelect($('eFor').value));
 $('eRec').addEventListener('change', () => {
@@ -364,7 +473,7 @@ $('eRec').addEventListener('change', () => {
 $('expForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const amount = parseAmt($('eAmt').value);
-  if (!(amount > 0)) { $('eHint').textContent = 'Введите сумму больше нуля, например 23,40'; $('eAmt').focus(); return; }
+  if (!(amount > 0)) { $('eHint').textContent = t('exp.amount_hint'); $('eAmt').focus(); return; }
   const date = $('eDate').value || today();
   const body = { amount, category: $('eCat').value, date, note: $('eNote').value.trim(), account: $('eAcc').value,
     recurring_id: $('eRec').value || null, for_month: $('eRec').value ? ($('eFor').value || null) : null };
@@ -372,37 +481,37 @@ $('expForm').addEventListener('submit', async (e) => {
   const ok = await write(async () => {
     if (ed) await api('PUT', `/api/expenses/${ed.id}`, body); else await api('POST', '/api/expenses', body);
     S.month = periodOf(date, S.periodStart); await loadExp(); render();
-  }, ed ? 'Сохранено' : 'Расход добавлен');
+  }, ed ? t('common.saved') : t('exp.added'));
   if (ok) { resetExp(); $('eAmt').focus(); }
 });
 
-/* ---------- доходы ---------- */
+/* ---------- income ---------- */
 function resetInc() {
   S.editInc = null; const keepDate = $('iDate').value, keepAcc = $('iAcc').value; $('incForm').reset();
   $('iDate').value = keepDate || today(); $('iAcc').value = keepAcc;
-  $('iSubmit').textContent = 'Добавить доход'; $('iCancel').hidden = true; $('iHint').textContent = '';
+  $('iSubmit').textContent = t('inc.add'); $('iCancel').hidden = true; $('iHint').textContent = '';
 }
 function editInc(x) {
-  S.editInc = x; $('iAmt').value = String(x.amount).replace('.', ','); $('iSrc').value = x.source || ''; $('iDate').value = x.date;
-  $('iNote').value = x.note || ''; $('iAcc').value = x.account || 'Другое';
-  $('iSubmit').textContent = 'Сохранить'; $('iCancel').hidden = false; $('iHint').textContent = 'Редактирование дохода'; $('iAmt').focus();
+  S.editInc = x; $('iAmt').value = String(x.amount).replace('.', ','); $('iSrc').value = x.source ? label(x.source) : ''; $('iDate').value = x.date;
+  $('iNote').value = x.note || ''; $('iAcc').value = x.account || OTHER;
+  $('iSubmit').textContent = t('common.save'); $('iCancel').hidden = false; $('iHint').textContent = t('inc.editing'); $('iAmt').focus();
 }
 $('iCancel').onclick = resetInc;
 $('incForm').addEventListener('submit', async (e) => {
   e.preventDefault();
   const amount = parseAmt($('iAmt').value);
-  if (!(amount > 0)) { $('iHint').textContent = 'Введите сумму больше нуля, например 3200'; $('iAmt').focus(); return; }
+  if (!(amount > 0)) { $('iHint').textContent = t('inc.amount_hint'); $('iAmt').focus(); return; }
   const date = $('iDate').value || today();
-  const body = { amount, source: $('iSrc').value.trim() || 'Другое', date, note: $('iNote').value.trim(), account: $('iAcc').value };
+  const body = { amount, source: canonSource($('iSrc').value.trim()) || OTHER, date, note: $('iNote').value.trim(), account: $('iAcc').value };
   const ed = S.editInc;
   const ok = await write(async () => {
     if (ed) await api('PUT', `/api/incomes/${ed.id}`, body); else await api('POST', '/api/incomes', body);
     S.month = periodOf(date, S.periodStart); await Promise.all([loadExp(), loadSources()]); render();
-  }, ed ? 'Сохранено' : 'Доход добавлен');
+  }, ed ? t('common.saved') : t('inc.added'));
   if (ok) { resetInc(); $('iAmt').focus(); }
 });
 
-/* ---------- план дохода ---------- */
+/* ---------- planned income ---------- */
 let incT;
 async function saveIncome() {
   clearTimeout(incT);
@@ -414,7 +523,7 @@ async function saveIncome() {
 $('income').addEventListener('input', () => { clearTimeout(incT); incT = setTimeout(saveIncome, 700); });
 $('income').addEventListener('blur', saveIncome);
 
-/* ---------- начало бюджетного месяца ---------- */
+/* ---------- start of the budget month ---------- */
 async function savePeriodStart() {
   const v = parseInt($('pstart').value, 10);
   if (!(v >= 1 && v <= 31)) { $('pstart').value = String(S.periodStart); return; }
@@ -423,23 +532,23 @@ async function savePeriodStart() {
     await api('PUT', '/api/settings', { periodStart: v });
     S.periodStart = v; S.month = periodOf(today(), v);
     await loadExp(); render();
-  }, `Месяц начинается ${v}-го`);
+  }, t('tile.pstart_saved', { day: v }));
 }
 $('pstart').addEventListener('change', savePeriodStart);
 $('pstart').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('pstart').blur(); });
 
-/* ---------- месяцы ---------- */
+/* ---------- months ---------- */
 async function shiftMonth(d) {
   const [y, m] = S.month.split('-').map(Number); const dt = new Date(y, m - 1 + d, 1);
   S.month = `${dt.getFullYear()}-${pad(dt.getMonth() + 1)}`; render();
-  try { await loadExp(); } catch { /* 401 уже обработан */ }
+  try { await loadExp(); } catch { /* 401 is already handled */ }
   render();
 }
 $('catReset').onclick = () => { S.cat = null; render(); };
 $('prevM').onclick = () => shiftMonth(-1);
 $('nextM').onclick = () => shiftMonth(1);
 
-/* ---------- импорт CSV ---------- */
+/* ---------- CSV import ---------- */
 const FORMAT_ACC = { revolut: 'Revolut', boc: 'Bank of Cyprus' };
 const IMP = { table: null, format: null, items: [], dropped: null, showHidden: false, seq: 0 };
 const visibleImport = () => IMP.items.filter((i) => i.status === 'new' || (i.status === 'skipped' && IMP.showHidden));
@@ -448,12 +557,12 @@ function openImport() { $('importPanel').hidden = false; $('impFile').focus(); }
 function closeImport() {
   $('importPanel').hidden = true; $('impFile').value = ''; $('impShowHidden').checked = false; $('impHint').textContent = '';
   Object.assign(IMP, { table: null, format: null, items: [], dropped: null, showHidden: false }); IMP.seq++;
-  $('impMap').hidden = true; $('impMeta').textContent = 'Revolut, Bank of Cyprus или любой CSV'; renderImport();
+  $('impMap').hidden = true; $('impMeta').textContent = t('import.meta'); renderImport();
 }
 function fillCols(sel, headers, val, optional) {
   sel.innerHTML = '';
   if (optional) { const o = el('option', null, '—'); o.value = '-1'; sel.appendChild(o); }
-  headers.forEach((h, i) => { const o = el('option', null, h || `Колонка ${i + 1}`); o.value = String(i); sel.appendChild(o); });
+  headers.forEach((h, i) => { const o = el('option', null, h || t('import.column', { n: i + 1 })); o.value = String(i); sel.appendChild(o); });
   sel.value = String(val < 0 && !optional ? 0 : val);
 }
 const colMap = () => ({ date: +$('mDate').value, desc: +$('mDesc').value, amount: +$('mAmt').value, debit: +$('mDebit').value, credit: +$('mCredit').value, negSign: $('mNeg').checked });
@@ -461,51 +570,51 @@ const colMap = () => ({ date: +$('mDate').value, desc: +$('mDesc').value, amount
 async function previewImport() {
   const seq = ++IMP.seq; const m = colMap();
   $('mNegWrap').hidden = !(m.debit < 0 && m.amount >= 0);
-  $('mCreditWrap').hidden = m.debit < 0; // колонка поступлений нужна только вместе с колонкой списаний
+  $('mCreditWrap').hidden = m.debit < 0; // the credit column only makes sense together with a debit column
   const { rows, dropped } = toTransactions(IMP.table, IMP.format, m);
   let items = []; $('impHint').textContent = '';
   if (rows.length) {
     try { items = await api('POST', '/api/import/preview', { account: $('impAcc').value, rows }); }
-    catch (err) { if (err.status !== 401 && seq === IMP.seq) $('impHint').textContent = err.message || 'Не удалось проверить выписку'; }
+    catch (err) { if (err.status !== 401 && seq === IMP.seq) $('impHint').textContent = err.message || t('import.preview_failed'); }
   }
-  if (seq !== IMP.seq) return; // пришёл ответ на устаревший запрос
+  if (seq !== IMP.seq) return; // a reply to an outdated request
   IMP.dropped = dropped;
-  // у дохода в category — источник (свободный текст), у расхода — категория из списка
-  IMP.items = items.map((r) => ({ ...r, category: r.kind === 'income' || CATS.includes(r.category) ? r.category : 'Другое', checked: r.status === 'new' }))
+  // for an income, category holds the source (free text); for an expense — a category from the list
+  IMP.items = items.map((r) => ({ ...r, category: r.kind === 'income' || CATS.includes(r.category) ? r.category : OTHER, checked: r.status === 'new' }))
     .sort((a, b) => (b.datetime || b.date).localeCompare(a.datetime || a.date));
-  $('impMeta').textContent = `Формат: ${{ revolut: 'Revolut', boc: 'Bank of Cyprus' }[IMP.format] || 'свой — проверьте колонки'}`;
+  $('impMeta').textContent = t('import.format', { name: FORMAT_ACC[IMP.format] || t('import.format_custom') });
   renderImport();
 }
 
 function importRow(it) {
   const r = el('div', `imp-row${it.checked ? '' : ' off'}`);
-  const cb = el('input'); cb.type = 'checkbox'; cb.checked = it.checked; cb.setAttribute('aria-label', 'Импортировать');
-  const dt = el('div', 'd num', new Date(`${it.date}T12:00:00`).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: '2-digit' }));
-  const nm = el('input', 'fld nm'); nm.value = it.note; nm.maxLength = 500; nm.setAttribute('aria-label', 'Название');
+  const cb = el('input'); cb.type = 'checkbox'; cb.checked = it.checked; cb.setAttribute('aria-label', t('import.submit'));
+  const dt = el('div', 'd num', new Date(`${it.date}T12:00:00`).toLocaleDateString(locale, { day: '2-digit', month: '2-digit', year: '2-digit' }));
+  const nm = el('input', 'fld nm'); nm.value = it.note; nm.maxLength = 500; nm.setAttribute('aria-label', t('field.name'));
   const inc = it.kind === 'income';
   let cat;
-  if (inc) { cat = el('input', 'fld icat'); cat.value = it.category; cat.maxLength = 100; cat.setAttribute('list', 'incSources'); cat.setAttribute('aria-label', 'Источник дохода'); }
-  else { cat = el('select', 'fld icat'); fillSelect(cat, CATS, it.category); cat.setAttribute('aria-label', 'Категория'); }
-  const rec = el('select', 'fld irec'); fillRecSelect(rec, it.recurring_id, 'не регулярный'); rec.setAttribute('aria-label', 'Регулярный платёж');
+  if (inc) { cat = el('input', 'fld icat'); cat.value = label(it.category); cat.maxLength = 100; cat.setAttribute('list', 'incSources'); cat.setAttribute('aria-label', t('import.income_source')); }
+  else { cat = el('select', 'fld icat'); fillSelect(cat, CATS, it.category); cat.setAttribute('aria-label', t('field.category')); }
+  const rec = el('select', 'fld irec'); fillRecSelect(rec, it.recurring_id, t('import.not_recurring')); rec.setAttribute('aria-label', t('field.recurring'));
   const amt = el('div', `amt${inc ? ' plus' : ''}`, `${inc ? '+' : ''}${fmt(it.amount)}`);
   const orig = el('div', 'orig'); const origT = el('span');
-  if (inc) orig.appendChild(el('span', 'chip inc', 'доход'));
-  if (it.status === 'skipped') orig.appendChild(el('span', 'chip', 'скрыта'));
+  if (inc) orig.appendChild(el('span', 'chip inc', t('import.chip_income')));
+  if (it.status === 'skipped') orig.appendChild(el('span', 'chip', t('import.chip_hidden')));
   orig.appendChild(origT);
   const showOrig = () => {
-    origT.textContent = it.note.trim() !== it.original ? `из выписки: ${it.original}` : '';
+    origT.textContent = it.note.trim() !== it.original ? t('import.from_statement', { text: it.original }) : '';
     orig.hidden = !origT.textContent && it.status !== 'skipped' && !inc;
   };
   cb.onchange = () => { it.checked = cb.checked; r.classList.toggle('off', !cb.checked); updateImportBtn(); };
   nm.oninput = () => { it.note = nm.value; showOrig(); };
-  cat.onchange = () => { it.category = inc ? cat.value.trim() || 'Другое' : cat.value; };
+  cat.onchange = () => { it.category = inc ? canonSource(cat.value.trim()) || OTHER : cat.value; };
   rec.onchange = () => {
     it.recurring_id = rec.value || null;
     const p = S.rec.find((x) => x.id === rec.value); if (!p) return;
     if (it.note === it.original) { it.note = p.name; nm.value = p.name; showOrig(); }
     if (CATS.includes(p.category)) { it.category = p.category; cat.value = p.category; }
   };
-  showOrig(); r.append(cb, dt, nm, cat, ...(inc ? [] : [rec]), amt, orig); // у дохода нет регулярного платежа
+  showOrig(); r.append(cb, dt, nm, cat, ...(inc ? [] : [rec]), amt, orig); // an income has no recurring payment
   return r;
 }
 
@@ -515,15 +624,15 @@ function renderImport() {
   const nNew = cnt('new'), nImp = cnt('imported'), nHid = cnt('skipped'), d = IMP.dropped || {};
   $('impTools').hidden = !IMP.table;
   const nInc = its.filter((i) => i.status === 'new' && i.kind === 'income').length;
-  const parts = [`новых ${nNew}${nInc ? `, из них доходов ${nInc}` : ''}`];
-  [[nImp, 'уже импортировано'], [nHid, 'скрыто'], [d.pending, 'в обработке'], [d.currency, 'не в EUR'],
-    [d.cancelled, 'отменённых'], [d.other, 'копилки'], [d.bad, 'не распознано']].forEach(([n, t]) => { if (n) parts.push(`${t} ${n}`); });
+  const parts = [nInc ? t('import.sum_new_inc', { n: nNew, inc: nInc }) : t('import.sum_new', { n: nNew })];
+  [[nImp, 'imported'], [nHid, 'hidden'], [d.pending, 'pending'], [d.currency, 'currency'],
+    [d.cancelled, 'cancelled'], [d.other, 'other'], [d.bad, 'bad']].forEach(([n, k]) => { if (n) parts.push(t(`import.sum_${k}`, { n })); });
   $('impSummary').textContent = parts.join(' · ');
   $('impHiddenWrap').hidden = !nHid;
   const vis = visibleImport();
   if (IMP.table && !vis.length) {
-    L.appendChild(el('div', 'empty', its.length ? 'Новых транзакций нет: всё из этого файла уже импортировано или скрыто.'
-      : `Расходов в файле не нашлось.${IMP.format === 'revolut' ? '' : ' Проверьте, какие колонки выбраны.'}`));
+    L.appendChild(el('div', 'empty', its.length ? t('import.none_new')
+      : `${t('import.none_found')}${IMP.format === 'revolut' ? '' : ` ${t('import.check_columns')}`}`));
   }
   vis.forEach((it) => L.appendChild(importRow(it)));
   updateImportBtn();
@@ -533,8 +642,8 @@ function updateImportBtn() {
   const vis = visibleImport();
   const k = vis.filter((i) => i.checked).length, s = vis.filter((i) => !i.checked && i.status === 'new').length;
   $('impSubmit').disabled = !(k + s);
-  const t = []; if (k) t.push(`Импортировать ${k}`); if (s) t.push(`${k ? 'скрыть' : 'Скрыть'} ${s}`);
-  $('impSubmit').textContent = t.join(' · ') || 'Импортировать';
+  const parts = []; if (k) parts.push(t('import.btn_import', { n: k })); if (s) parts.push(t(k ? 'import.btn_hide_also' : 'import.btn_hide', { n: s }));
+  $('impSubmit').textContent = parts.join(' · ') || t('import.submit');
 }
 
 $('impOpen').onclick = () => ($('importPanel').hidden ? openImport() : closeImport());
@@ -542,7 +651,7 @@ $('impCancel').onclick = closeImport;
 $('impFile').addEventListener('change', async () => {
   const f = $('impFile').files[0]; if (!f) return;
   const table = parseCsv(await f.text());
-  if (!table.rows.length) { closeImport(); openImport(); $('impHint').textContent = 'В файле не нашлось строк с данными'; return; }
+  if (!table.rows.length) { closeImport(); openImport(); $('impHint').textContent = t('import.no_rows'); return; }
   IMP.table = table; IMP.format = detectFormat(table.headers);
   if (FORMAT_ACC[IMP.format]) $('impAcc').value = FORMAT_ACC[IMP.format];
   $('impMap').hidden = IMP.format === 'revolut';
@@ -555,7 +664,7 @@ $('impFile').addEventListener('change', async () => {
   }
   await previewImport();
 });
-// сумма со знаком и отдельная колонка списаний — взаимоисключающие
+// a signed amount and a separate debit column are mutually exclusive
 $('mAmt').addEventListener('change', () => { if (+$('mAmt').value >= 0) { $('mDebit').value = '-1'; $('mNeg').checked = hasNegatives(IMP.table.rows, +$('mAmt').value); } });
 $('mDebit').addEventListener('change', () => { if (+$('mDebit').value >= 0) $('mAmt').value = '-1'; });
 ['mDate', 'mDesc', 'mAmt', 'mDebit', 'mCredit', 'mNeg', 'impAcc'].forEach((id) => $(id).addEventListener('change', () => { if (IMP.table) previewImport(); }));
@@ -574,28 +683,36 @@ $('impSubmit').onclick = async () => {
   let res;
   const ok = await write(async () => {
     res = await api('POST', '/api/import/commit', { account: $('impAcc').value, items });
-    // если в текущем месяце ничего не добавилось — показываем последний месяц из импорта
+    // if nothing was added to the current month, show the latest imported month
     const months = items.filter((i) => i.action === 'import').map((i) => periodOf(i.date, S.periodStart)).sort();
     if (months.length && !months.includes(S.month)) S.month = months.at(-1);
     await Promise.all([loadExp(), loadSources()]); render();
   });
   if (ok) {
-    toast(`Импортировано ${res.imported}${res.incomes ? ` (доходов ${res.incomes})` : ''}${res.skipped ? `, скрыто ${res.skipped}` : ''}`);
+    toast(t('import.done', { n: res.imported }) + (res.incomes ? t('import.done_incomes', { n: res.incomes }) : '') + (res.skipped ? t('import.done_skipped', { n: res.skipped }) : ''));
     closeImport();
   } else updateImportBtn();
 };
 
-/* ---------- вход ---------- */
+/* ---------- sign-in ---------- */
 function showLogin() { $('appView').hidden = true; $('loginView').hidden = false; $('pw').focus(); }
 function showApp(passwordRequired) { $('loginView').hidden = true; $('appView').hidden = false; $('logout').hidden = !passwordRequired; }
 $('loginForm').addEventListener('submit', async (e) => {
   e.preventDefault(); $('loginErr').textContent = '';
   try { await api('POST', '/api/login', { password: $('pw').value }); $('pw').value = ''; showApp(true); loadAll(); }
-  catch (err) { $('loginErr').textContent = err.message || 'Не удалось войти'; }
+  catch (err) { $('loginErr').textContent = err.message || t('login.failed'); }
 });
-$('logout').onclick = async () => { await api('POST', '/api/logout').catch(() => {}); S.rec = []; S.exp = []; S.inc = []; S.cat = null; S.loaded = false; closeImport(); showLogin(); };
+$('logout').onclick = async () => { await api('POST', '/api/logout').catch(() => {}); S.rec = []; S.exp = []; S.inc = []; S.cat = null; S.acc = null; S.loaded = false; closeImport(); showLogin(); };
 
-/* ---------- старт ---------- */
+/* ---------- start ---------- */
+applyDom();
+// Language switch: the choice is kept in a cookie (the server reads it too), the page reloads in the new language
+document.querySelectorAll('.lang').forEach((box) => {
+  LANGS.forEach(({ id, label: name }) => {
+    const b = el('button', null, name); b.type = 'button'; b.lang = id; b.setAttribute('aria-pressed', String(id === lang));
+    b.onclick = () => setLang(id); box.appendChild(b);
+  });
+});
 fillSelect($('rCat'), CATS, 'Жильё'); fillSelect($('eCat'), CATS, 'Продукты');
 fillSelect($('rAcc'), ACCS, 'Bank of Cyprus'); fillSelect($('eAcc'), ACCS, 'Revolut'); fillSelect($('impAcc'), ACCS, 'Revolut'); fillSelect($('iAcc'), ACCS, 'Bank of Cyprus');
 $('eDate').value = today(); $('iDate').value = today();
@@ -604,5 +721,5 @@ $('eDate').value = today(); $('iDate').value = today();
     const me = await api('GET', '/api/me');
     if (!me.authed) { showLogin(); return; }
     showApp(me.passwordRequired); render(); loadAll();
-  } catch { showApp(false); const b = $('banner'); b.hidden = false; b.textContent = 'Сервер недоступен.'; }
+  } catch { showApp(false); const b = $('banner'); b.hidden = false; b.textContent = t('banner.server_down'); }
 })();

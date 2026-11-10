@@ -14,7 +14,7 @@ export default async function settings(app) {
         type: 'object', additionalProperties: false,
         properties: {
           income: { type: 'number', minimum: 0, maximum: 1e9 },
-          periodStart: { type: 'integer', minimum: 1, maximum: 31 }, // бюджетный месяц начинается с этого числа
+          periodStart: { type: 'integer', minimum: 1, maximum: 31 }, // the budget month starts on this day
         },
       },
     },

@@ -5,7 +5,7 @@ services:
     environment:
       POSTGRES_DB: budget
       POSTGRES_USER: budget
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Задайте POSTGRES_PASSWORD в .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -13,7 +13,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
-    # порт наружу не открыт: база доступна только приложению
+    # no port is published: the database is reachable only by the app
 
   app:
     build: ./app
@@ -24,9 +24,17 @@ services:
     environment:
       DATABASE_URL: postgres://budget:${POSTGRES_PASSWORD}@db:5432/budget
       APP_PASSWORD: ${APP_PASSWORD:-}
-      SESSION_SECRET: ${SESSION_SECRET:?Задайте SESSION_SECRET в .env (32+ символа)}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env (32+ characters)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       LOG_LEVEL: ${LOG_LEVEL:-info}
+      # "Budget advice": the LLM and its key (see README → AI advice); empty — the advice panel is off
+      LLM_PROVIDER: ${LLM_PROVIDER:-}
+      LLM_KEY: ${LLM_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+    extra_hosts:
+      # lets the container reach Ollama running on the host (LLM_PROVIDER=ollama)
+      - "host.docker.internal:host-gateway"
 
   web:
     image: nginx:1.27-alpine

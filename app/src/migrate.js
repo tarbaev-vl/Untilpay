@@ -5,11 +5,11 @@ import { pool } from './db.js';
 
 const dir = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'migrations');
 
-/** Применяет новые .sql файлы из migrations/ по порядку, каждый в своей транзакции. */
+/** Applies new .sql files from migrations/ in order, each in its own transaction. */
 export async function migrate(log = console) {
   const client = await pool.connect();
   try {
-    // advisory lock: два контейнера не будут мигрировать одновременно
+    // advisory lock: two containers never migrate at the same time
     await client.query('SELECT pg_advisory_lock(727001)');
     await client.query(`CREATE TABLE IF NOT EXISTS schema_migrations (
       name TEXT PRIMARY KEY, applied_at TIMESTAMPTZ NOT NULL DEFAULT now())`);
@@ -36,7 +36,7 @@ export async function migrate(log = console) {
   }
 }
 
-// Запуск вручную: npm run migrate
+// Manual run: npm run migrate
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   migrate()
     .then(() => pool.end())

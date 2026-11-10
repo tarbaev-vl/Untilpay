@@ -1,140 +1,150 @@
 <!doctype html>
-<html lang="ru">
+<html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#0B6E7C">
-<title>Семейный бюджет</title>
+<title>Home Budget</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
 <link rel="stylesheet" href="/style.css">
 </head>
 <body>
 
-<!-- Вход -->
+<!-- Sign-in -->
 <div class="login" id="loginView" hidden>
   <form id="loginForm">
     <div>
-      <div class="eyebrow">Бюджет · EUR</div>
-      <h1>Семейный бюджет</h1>
+      <div class="eyebrow" data-i18n="app.eyebrow">Budget · EUR</div>
+      <h1 data-i18n="app.title">Home Budget</h1>
     </div>
-    <label class="f" for="pw">Пароль<input id="pw" type="password" autocomplete="current-password" required></label>
+    <label class="f" for="pw"><span data-i18n="login.password">Password</span><input id="pw" type="password" autocomplete="current-password" required></label>
     <div class="err" id="loginErr" role="alert"></div>
-    <button class="btn" type="submit">Войти</button>
+    <button class="btn" type="submit" data-i18n="login.submit">Sign in</button>
+    <div class="seg lang" role="group" data-i18n-attr="aria-label:lang.label" aria-label="Language"></div>
   </form>
 </div>
 
 <div class="wrap" id="appView" hidden>
   <header class="top">
     <div>
-      <div class="eyebrow">Бюджет · EUR</div>
-      <h1>Семейный бюджет</h1>
+      <div class="eyebrow" data-i18n="app.eyebrow">Budget · EUR</div>
+      <h1 data-i18n="app.title">Home Budget</h1>
     </div>
     <div class="top-actions">
-      <div class="month" role="group" aria-label="Месяц">
-        <button class="iconbtn" id="prevM" aria-label="Предыдущий месяц">‹</button>
+      <div class="seg lang" role="group" data-i18n-attr="aria-label:lang.label" aria-label="Language"></div>
+      <div class="month" role="group" data-i18n-attr="aria-label:top.month" aria-label="Month">
+        <button class="iconbtn" id="prevM" data-i18n-attr="aria-label:top.prev" aria-label="Previous month">‹</button>
         <span class="mlbl"><span id="monthLabel">—</span><small id="periodLabel" hidden></small></span>
-        <button class="iconbtn" id="nextM" aria-label="Следующий месяц">›</button>
+        <button class="iconbtn" id="nextM" data-i18n-attr="aria-label:top.next" aria-label="Next month">›</button>
       </div>
-      <button class="btn ghost small" id="impOpen" type="button">Импорт CSV</button>
-      <a class="btn ghost small" id="csvLink" href="#">Скачать CSV</a>
-      <button class="btn ghost small" id="logout" type="button" hidden>Выйти</button>
+      <button class="btn ghost small" id="impOpen" type="button" data-i18n="top.import">Import CSV</button>
+      <a class="btn ghost small" id="csvLink" href="#" data-i18n="top.download">Download CSV</a>
+      <button class="btn ghost small" id="logout" type="button" hidden data-i18n="top.logout">Sign out</button>
     </div>
   </header>
 
   <div id="banner" class="banner warn" hidden></div>
 
   <section class="panel" id="importPanel" aria-labelledby="impH" hidden>
-    <div class="panel-h"><h2 id="impH">Импорт из CSV-выписки</h2><span class="meta" id="impMeta">Revolut, Bank of Cyprus или любой CSV</span></div>
+    <div class="panel-h"><h2 id="impH" data-i18n="import.title">Import from a CSV statement</h2><span class="meta" id="impMeta" data-i18n="import.meta">Revolut, Bank of Cyprus or any CSV</span></div>
     <div class="add">
       <div class="row">
-        <label class="f grow" for="impFile">Файл выписки<input id="impFile" type="file" accept=".csv,text/csv,text/plain"></label>
-        <label class="f" for="impAcc">Счёт<select id="impAcc"></select></label>
+        <label class="f grow" for="impFile"><span data-i18n="import.file">Statement file</span><input id="impFile" type="file" accept=".csv,text/csv,text/plain"></label>
+        <label class="f" for="impAcc"><span data-i18n="field.account">Account</span><select id="impAcc"></select></label>
       </div>
       <div id="impMap" hidden>
         <div class="row">
-          <label class="f" for="mDate">Дата<select id="mDate"></select></label>
-          <label class="f grow" for="mDesc">Описание<select id="mDesc"></select></label>
-          <label class="f" for="mAmt">Сумма (±)<select id="mAmt"></select></label>
-          <label class="f" for="mDebit">Или списание<select id="mDebit"></select></label>
-          <label class="f" for="mCredit" id="mCreditWrap">Поступление<select id="mCredit"></select></label>
+          <label class="f" for="mDate"><span data-i18n="field.date">Date</span><select id="mDate"></select></label>
+          <label class="f grow" for="mDesc"><span data-i18n="import.description">Description</span><select id="mDesc"></select></label>
+          <label class="f" for="mAmt"><span data-i18n="import.amount_signed">Amount (±)</span><select id="mAmt"></select></label>
+          <label class="f" for="mDebit"><span data-i18n="import.debit">Or debit</span><select id="mDebit"></select></label>
+          <label class="f" for="mCredit" id="mCreditWrap"><span data-i18n="import.credit">Credit</span><select id="mCredit"></select></label>
         </div>
-        <label class="check" id="mNegWrap"><input type="checkbox" id="mNeg"> Расходы записаны со знаком минус</label>
+        <label class="check" id="mNegWrap"><input type="checkbox" id="mNeg"> <span data-i18n="import.neg">Expenses are written with a minus sign</span></label>
       </div>
       <div class="imp-tools" id="impTools" hidden>
         <span class="hint" id="impSummary"></span>
-        <label class="check" id="impHiddenWrap"><input type="checkbox" id="impShowHidden"> Показать скрытые</label>
-        <button type="button" class="op" id="impAll">Отметить все</button>
-        <button type="button" class="op" id="impNone">Снять все</button>
+        <label class="check" id="impHiddenWrap"><input type="checkbox" id="impShowHidden"> <span data-i18n="import.show_hidden">Show hidden</span></label>
+        <button type="button" class="op" id="impAll" data-i18n="import.check_all">Check all</button>
+        <button type="button" class="op" id="impNone" data-i18n="import.uncheck_all">Uncheck all</button>
       </div>
     </div>
     <div class="imp-list" id="impList"></div>
     <div class="actions imp-actions"><span class="hint" id="impHint"></span>
-      <button type="button" class="btn ghost" id="impCancel">Закрыть</button>
-      <button type="button" class="btn" id="impSubmit" disabled>Импортировать</button></div>
+      <button type="button" class="btn ghost" id="impCancel" data-i18n="import.close">Close</button>
+      <button type="button" class="btn" id="impSubmit" disabled data-i18n="import.submit">Import</button></div>
   </section>
 
-  <section class="summary" aria-label="Итоги месяца">
-    <div class="tile"><div class="eyebrow"><span class="dot d-mand"></span>Обязательные</div><div class="val" id="tMand">—</div><div class="sub" id="tMandSub">в месяц</div></div>
-    <div class="tile"><div class="eyebrow"><span class="dot d-subs"></span>Подписки</div><div class="val" id="tSubs">—</div><div class="sub" id="tSubsSub">в месяц</div></div>
-    <div class="tile"><div class="eyebrow"><span class="dot d-var"></span>Расходы за месяц</div><div class="val" id="tVar">—</div><div class="sub" id="tVarSub">—</div></div>
-    <div class="tile rest"><div class="eyebrow">Остаток</div><div class="val" id="tRest">—</div>
+  <section class="summary" data-i18n-attr="aria-label:tile.summary_aria" aria-label="Month totals">
+    <div class="tile"><div class="eyebrow"><span class="dot d-mand"></span><span data-i18n="tile.mandatory">Mandatory</span></div><div class="val" id="tMand">—</div><div class="sub" id="tMandSub" data-i18n="tile.per_month">per month</div></div>
+    <div class="tile"><div class="eyebrow"><span class="dot d-subs"></span><span data-i18n="tile.subs">Subscriptions</span></div><div class="val" id="tSubs">—</div><div class="sub" id="tSubsSub" data-i18n="tile.per_month">per month</div></div>
+    <div class="tile"><div class="eyebrow"><span class="dot d-var"></span><span data-i18n="tile.expenses">Expenses this month</span></div><div class="val" id="tVar">—</div><div class="sub" id="tVarSub">—</div></div>
+    <div class="tile rest"><div class="eyebrow" data-i18n="tile.rest">Left</div><div class="val" id="tRest">—</div>
       <div class="sub" id="tIncFact"></div>
       <div class="sub" id="tExpected" hidden></div>
-      <label class="income sub" for="income">План дохода <input id="income" class="num" inputmode="decimal" placeholder="0"></label>
-      <label class="income sub" for="pstart">Месяц с <input id="pstart" class="num" inputmode="numeric" maxlength="2" placeholder="1"> числа</label></div>
+      <label class="income sub" for="income"><span data-i18n="tile.income_plan">Planned income</span> <input id="income" class="num" inputmode="decimal" placeholder="0"></label>
+      <label class="income sub" for="pstart"><span data-i18n="tile.pstart_before">Month starts on day</span> <input id="pstart" class="num" inputmode="numeric" maxlength="2" placeholder="1"> <span data-i18n="tile.pstart_after"></span></label></div>
   </section>
 
-  <section class="load" aria-label="Структура трат">
-    <div class="eyebrow">Куда уходят деньги в этом месяце</div>
+  <section class="load" data-i18n-attr="aria-label:load.aria" aria-label="Spending structure">
+    <div class="eyebrow" data-i18n="load.title">Where the money goes this month</div>
     <div class="stack" id="stack"></div>
     <div class="legend" id="legend"></div>
+  </section>
+
+  <section class="panel" id="aiPanel" aria-labelledby="aiH">
+    <div class="panel-h"><button type="button" class="ai-toggle" id="aiToggle" aria-expanded="false" aria-controls="aiBody">
+        <span class="chev" aria-hidden="true">▸</span><h2 id="aiH" data-i18n="ai.title">Budget advice</h2></button>
+      <span class="meta" id="aiMeta"></span>
+      <button type="button" class="btn small" id="aiRun" data-i18n="ai.get">Get advice</button></div>
+    <div class="ai-body" id="aiBody" hidden></div>
   </section>
 
   <div class="cols">
     <div class="col">
     <section class="panel" aria-labelledby="recH">
-      <div class="panel-h"><h2 id="recH">Регулярные платежи</h2><span class="meta" id="recMeta"></span></div>
+      <div class="panel-h"><h2 id="recH" data-i18n="rec.title">Recurring payments</h2><span class="meta" id="recMeta"></span></div>
       <form class="add" id="recForm" autocomplete="off">
         <div class="row">
-          <label class="f grow" for="rName">Название<input id="rName" required maxlength="200" placeholder="Netflix, аренда, страховка…"></label>
-          <label class="f amt" for="rAmt">Сумма, €<input id="rAmt" class="num" required inputmode="decimal" placeholder="0,00"></label>
-          <label class="f" for="rPeriod">Как часто<select id="rPeriod">
-            <option value="month">Каждый месяц</option><option value="year">Раз в год</option>
-            <option value="quarter">Раз в квартал</option><option value="week">Каждую неделю</option></select></label>
+          <label class="f grow" for="rName"><span data-i18n="field.name">Name</span><input id="rName" required maxlength="200" data-i18n-attr="placeholder:rec.name_ph" placeholder="Netflix, rent, insurance…"></label>
+          <label class="f amt" for="rAmt"><span data-i18n="field.amount">Amount, €</span><input id="rAmt" class="num" required inputmode="decimal" data-i18n-attr="placeholder:field.amount_ph" placeholder="0.00"></label>
+          <label class="f" for="rPeriod"><span data-i18n="rec.how_often">How often</span><select id="rPeriod">
+            <option value="month" data-i18n="rec.every_month">Every month</option><option value="year" data-i18n="rec.every_year">Once a year</option>
+            <option value="quarter" data-i18n="rec.every_quarter">Once a quarter</option><option value="week" data-i18n="rec.every_week">Every week</option></select></label>
         </div>
         <div class="row">
-          <div class="f fgroup">Тип
-            <div class="seg" id="rKind" role="group" aria-label="Тип платежа">
-              <button type="button" data-v="mandatory" aria-pressed="true">Обязательный</button>
-              <button type="button" data-v="subscription" aria-pressed="false">Подписка</button>
+          <div class="f fgroup"><span data-i18n="rec.type">Type</span>
+            <div class="seg" id="rKind" role="group" data-i18n-attr="aria-label:rec.type_aria" aria-label="Payment type">
+              <button type="button" data-v="mandatory" aria-pressed="true" data-i18n="rec.kind_mandatory">Mandatory</button>
+              <button type="button" data-v="subscription" aria-pressed="false" data-i18n="rec.kind_subscription">Subscription</button>
             </div></div>
-          <label class="f" for="rCat">Категория<select id="rCat"></select></label>
-          <label class="f" for="rAcc">Счёт<select id="rAcc"></select></label>
-          <label class="f amt" for="rDay">День списания<input id="rDay" class="num" inputmode="numeric" placeholder="1–31"></label>
+          <label class="f" for="rCat"><span data-i18n="field.category">Category</span><select id="rCat"></select></label>
+          <label class="f" for="rAcc"><span data-i18n="field.account">Account</span><select id="rAcc"></select></label>
+          <label class="f amt" for="rDay"><span data-i18n="rec.day">Charge day</span><input id="rDay" class="num" inputmode="numeric" placeholder="1–31"></label>
         </div>
         <div class="actions"><span class="hint" id="rHint"></span>
-          <button type="button" class="btn ghost" id="rCancel" hidden>Отмена</button>
-          <button class="btn" id="rSubmit">Добавить платёж</button></div>
+          <button type="button" class="btn ghost" id="rCancel" hidden data-i18n="common.cancel">Cancel</button>
+          <button class="btn" id="rSubmit" data-i18n="rec.add">Add payment</button></div>
       </form>
       <div class="list" id="recList"></div>
     </section>
 
     <section class="panel" aria-labelledby="incH">
-      <div class="panel-h"><h2 id="incH">Доходы</h2><span class="meta" id="incMeta"></span></div>
+      <div class="panel-h"><h2 id="incH" data-i18n="inc.title">Income</h2><span class="meta" id="incMeta"></span></div>
       <form class="add" id="incForm" autocomplete="off">
         <div class="row">
-          <label class="f amt" for="iAmt">Сумма, €<input id="iAmt" class="num" required inputmode="decimal" placeholder="0,00"></label>
-          <label class="f grow" for="iSrc">Источник<input id="iSrc" list="incSources" maxlength="100" placeholder="Зарплата, фриланс, возврат…"></label>
-          <label class="f" for="iDate">Дата<input id="iDate" type="date" required></label>
+          <label class="f amt" for="iAmt"><span data-i18n="field.amount">Amount, €</span><input id="iAmt" class="num" required inputmode="decimal" data-i18n-attr="placeholder:field.amount_ph" placeholder="0.00"></label>
+          <label class="f grow" for="iSrc"><span data-i18n="inc.source">Source</span><input id="iSrc" list="incSources" maxlength="100" data-i18n-attr="placeholder:inc.source_ph" placeholder="Salary, freelance, refund…"></label>
+          <label class="f" for="iDate"><span data-i18n="field.date">Date</span><input id="iDate" type="date" required></label>
         </div>
         <div class="row">
-          <label class="f grow" for="iNote">Комментарий<input id="iNote" maxlength="500" placeholder="За октябрь, проект X…"></label>
-          <label class="f" for="iAcc">Счёт<select id="iAcc"></select></label>
+          <label class="f grow" for="iNote"><span data-i18n="field.note">Note</span><input id="iNote" maxlength="500" data-i18n-attr="placeholder:inc.note_ph" placeholder="For October, project X…"></label>
+          <label class="f" for="iAcc"><span data-i18n="field.account">Account</span><select id="iAcc"></select></label>
         </div>
         <div class="actions"><span class="hint" id="iHint"></span>
-          <button type="button" class="btn ghost" id="iCancel" hidden>Отмена</button>
-          <button class="btn" id="iSubmit">Добавить доход</button></div>
+          <button type="button" class="btn ghost" id="iCancel" hidden data-i18n="common.cancel">Cancel</button>
+          <button class="btn" id="iSubmit" data-i18n="inc.add">Add income</button></div>
       </form>
       <div class="subhead" id="incBySrc" hidden></div>
       <div class="list" id="incList"></div>
@@ -142,26 +152,27 @@
     </div>
 
     <section class="panel" aria-labelledby="expH">
-      <div class="panel-h"><h2 id="expH">Расходы</h2><span class="meta" id="expMeta"></span></div>
+      <div class="panel-h"><h2 id="expH" data-i18n="exp.title">Expenses</h2><span class="meta" id="expMeta"></span></div>
       <form class="add" id="expForm" autocomplete="off">
         <div class="row">
-          <label class="f amt" for="eAmt">Сумма, €<input id="eAmt" class="num" required inputmode="decimal" placeholder="0,00"></label>
-          <label class="f" for="eCat">Категория<select id="eCat"></select></label>
-          <label class="f" for="eDate">Дата<input id="eDate" type="date" required></label>
+          <label class="f amt" for="eAmt"><span data-i18n="field.amount">Amount, €</span><input id="eAmt" class="num" required inputmode="decimal" data-i18n-attr="placeholder:field.amount_ph" placeholder="0.00"></label>
+          <label class="f" for="eCat"><span data-i18n="field.category">Category</span><select id="eCat"></select></label>
+          <label class="f" for="eDate"><span data-i18n="field.date">Date</span><input id="eDate" type="date" required></label>
         </div>
         <div class="row">
-          <label class="f grow" for="eNote">Комментарий<input id="eNote" maxlength="500" placeholder="Alphamega, бензин, аптека…"></label>
-          <label class="f" for="eAcc">Счёт<select id="eAcc"></select></label>
-          <label class="f rec" for="eRec">Регулярный платёж<select id="eRec"></select></label>
-          <label class="f" for="eFor" id="eForWrap" hidden>За месяц<select id="eFor"></select></label>
+          <label class="f grow" for="eNote"><span data-i18n="field.note">Note</span><input id="eNote" maxlength="500" data-i18n-attr="placeholder:exp.note_ph" placeholder="Supermarket, fuel, pharmacy…"></label>
+          <label class="f" for="eAcc"><span data-i18n="field.account">Account</span><select id="eAcc"></select></label>
+          <label class="f rec" for="eRec"><span data-i18n="field.recurring">Recurring payment</span><select id="eRec"></select></label>
+          <label class="f" for="eFor" id="eForWrap" hidden><span data-i18n="exp.for_month">For month</span><select id="eFor"></select></label>
         </div>
         <div class="actions"><span class="hint" id="eHint"></span>
-          <button type="button" class="btn ghost" id="eCancel" hidden>Отмена</button>
-          <button class="btn" id="eSubmit">Добавить расход</button></div>
+          <button type="button" class="btn ghost" id="eCancel" hidden data-i18n="common.cancel">Cancel</button>
+          <button class="btn" id="eSubmit" data-i18n="exp.add">Add expense</button></div>
       </form>
-      <div class="subhead"><span class="eyebrow">По категориям</span>
-        <button type="button" class="op" id="catReset" hidden>Показать все</button></div>
+      <div class="subhead"><span class="eyebrow" data-i18n="exp.by_category">By category</span>
+        <button type="button" class="op" id="catReset" hidden data-i18n="exp.show_all">Show all</button></div>
       <div class="cats" id="cats"></div>
+      <div class="accs" id="accs" role="group" data-i18n-attr="aria-label:exp.acc_filter" aria-label="Filter by account" hidden></div>
       <div class="list" id="expList"></div>
     </section>
   </div>

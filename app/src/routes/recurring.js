@@ -1,5 +1,6 @@
 import { query } from '../db.js';
 
+// 'Другое' ("Other") is the stored default value; the UI translates it for display
 const body = {
   type: 'object',
   required: ['name', 'amount'],
@@ -43,11 +44,11 @@ export default async function recurring(app) {
          active=$8, updated_at=now() WHERE id=$9 RETURNING ${cols}`,
       [b.name.trim(), b.amount, b.period, b.kind, b.category, b.account, b.day, b.active, req.params.id],
     );
-    if (!rows.length) return reply.code(404).send({ error: 'not_found', message: 'Платёж не найден' });
+    if (!rows.length) return reply.code(404).send({ error: 'not_found', message: req.t('recurring.not_found') });
     return rows[0];
   });
 
-  // пауза / включение
+  // pause / resume
   app.patch('/api/recurring/:id', {
     schema: {
       params: idParam,
@@ -58,13 +59,13 @@ export default async function recurring(app) {
       `UPDATE recurring SET active=$1, updated_at=now() WHERE id=$2 RETURNING ${cols}`,
       [req.body.active, req.params.id],
     );
-    if (!rows.length) return reply.code(404).send({ error: 'not_found', message: 'Платёж не найден' });
+    if (!rows.length) return reply.code(404).send({ error: 'not_found', message: req.t('recurring.not_found') });
     return rows[0];
   });
 
   app.delete('/api/recurring/:id', { schema: { params: idParam } }, async (req, reply) => {
     const { rowCount } = await query('DELETE FROM recurring WHERE id=$1', [req.params.id]);
-    if (!rowCount) return reply.code(404).send({ error: 'not_found', message: 'Платёж не найден' });
+    if (!rowCount) return reply.code(404).send({ error: 'not_found', message: req.t('recurring.not_found') });
     return reply.code(204).send();
   });
 }

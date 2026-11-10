@@ -1,4 +1,5 @@
--- Регулярные платежи: аренда, коммуналка, страховки, подписки
+-- Recurring payments: rent, utilities, insurance, subscriptions
+-- ('Другое' = "Other": the stored default value, translated by the UI for display)
 CREATE TABLE recurring (
   id          BIGSERIAL PRIMARY KEY,
   name        TEXT          NOT NULL CHECK (length(name) BETWEEN 1 AND 200),
@@ -13,7 +14,7 @@ CREATE TABLE recurring (
   updated_at  TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
--- Разовые расходы
+-- One-off expenses
 CREATE TABLE expenses (
   id          BIGSERIAL PRIMARY KEY,
   amount      NUMERIC(12,2) NOT NULL CHECK (amount > 0),
@@ -26,7 +27,7 @@ CREATE TABLE expenses (
 );
 CREATE INDEX expenses_spent_on_idx ON expenses (spent_on);
 
--- Настройки (доход в месяц и т.п.)
+-- Settings (monthly income etc.)
 CREATE TABLE settings (
   key         TEXT PRIMARY KEY,
   value       JSONB NOT NULL,
