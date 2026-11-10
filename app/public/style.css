@@ -126,6 +126,12 @@ img{max-width:100%}
 .bank-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .bank-row .nm{flex:2 1 160px;min-width:0;font-size:.9rem}
 .bank-row .fld{flex:1 1 130px;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+.bank-row .fld.per{flex:1 1 170px}
+.bank-row .rng{flex:0 1 auto;font-size:.82rem;color:var(--muted);white-space:nowrap}
+.bank-row .custom{display:flex;flex:2 1 260px;gap:6px;align-items:center;min-width:0}
+.bank-row .custom[hidden]{display:none}
+.bank-row .custom .fld{flex:1 1 120px}
+.bank-row .dash{color:var(--muted)}
 .bank .hint{font-size:.82rem;color:var(--muted)}
 .bank .hint:empty{display:none}
 .row>.bank-cc{flex:0 1 90px}

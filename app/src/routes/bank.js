@@ -16,7 +16,7 @@ function message(req, code, params = {}) {
   const p = { ...params, detail: params.detail ? `: ${params.detail}` : '' };
   return req.t(`bank.${code}`, p);
 }
-const ERR_STATUS = { rate: 429, expired: 409, off: 503, key: 503, redirect_missing: 503 };
+const ERR_STATUS = { rate: 429, expired: 409, period: 400, off: 503, key: 503, redirect_missing: 503 };
 const fail = (req, reply, err) => {
   req.log.warn({ code: err.code, status: err.status, msg: err.message }, 'bank error');
   return reply.code(ERR_STATUS[err.code] || 502).send({ error: `bank_${err.code}`, message: message(req, err.code, err.params) });
@@ -141,11 +141,18 @@ export default async function bank(app) {
   // Which app account a bank account belongs to, and up to which date its transactions have been reviewed
   app.put('/api/bank/accounts/:id', {
     ...auth,
-    schema: { params: idParam, body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { account: { type: 'string', minLength: 1, maxLength: 100 }, synced_to: date } } },
+    schema: { params: idParam, body: { type: 'object', additionalProperties: false, minProperties: 1, properties: { account: { type: 'string', minLength: 1, maxLength: 100 }, synced_from: date, synced_to: date } } },
   }, async (req, reply) => {
+    // synced_to (the reviewed range synced_from..synced_to) only moves forward and only without a gap:
+    // a range starting after the last synced day would otherwise make "since the last sync" skip the days in between
     const { rowCount } = await query(
-      'UPDATE bank_accounts SET account = coalesce($1, account), synced_to = coalesce($2, synced_to) WHERE id = $3',
-      [req.body.account ?? null, req.body.synced_to ?? null, req.params.id],
+      `UPDATE bank_accounts SET account = coalesce($1, account),
+         synced_to = CASE
+           WHEN $3::date IS NULL THEN synced_to
+           WHEN synced_to IS NULL OR $2::date IS NULL OR $2::date <= synced_to + 1 THEN greatest(synced_to, $3::date)
+           ELSE synced_to END
+       WHERE id = $4`,
+      [req.body.account ?? null, req.body.synced_from ?? null, req.body.synced_to ?? null, req.params.id],
     );
     if (!rowCount) return reply.code(404).send({ error: 'not_found', message: req.t('bank.not_found') });
     return { ok: true };
@@ -163,7 +170,7 @@ export default async function bank(app) {
   app.get('/api/bank/transactions', {
     ...auth,
     config: { rateLimit: { max: 30, timeWindow: '1 hour' } },
-    schema: { querystring: { type: 'object', required: ['account_id'], properties: { account_id: { type: 'string', pattern: '^[0-9]+$' }, from: date } } },
+    schema: { querystring: { type: 'object', required: ['account_id'], properties: { account_id: { type: 'string', pattern: '^[0-9]+$' }, from: date, to: date } } },
   }, async (req, reply) => {
     const { rows: [acc] } = await query(
       `SELECT a.uid, a.account, a.synced_to, c.valid_until FROM bank_accounts a JOIN bank_connections c ON c.id = a.connection_id
@@ -172,11 +179,21 @@ export default async function bank(app) {
     if (!acc) return reply.code(404).send({ error: 'not_found', message: req.t('bank.not_found') });
     const c = client(req, reply); if (!c) return reply;
     if (!acc.valid_until || new Date(acc.valid_until) <= new Date()) return fail(req, reply, new BankError('expired'));
-    const from = req.query.from
+    // The browser sends its local dates, which may already be "tomorrow" in UTC: one day of slack,
+    // then both ends are capped at today in UTC (the bank API assumes UTC and rejects future dates)
+    const utcToday = isoDay(new Date());
+    const tomorrow = isoDay(new Date(Date.now() + DAY));
+    const { from: qFrom, to: qTo } = req.query;
+    if ((qTo && qTo > tomorrow) || (qFrom && qFrom > (qTo || tomorrow))) {
+      return reply.code(400).send({ error: 'bank_period', message: message(req, 'period') });
+    }
+    const to = qTo && qTo < utcToday ? qTo : utcToday;
+    let from = qFrom
       || isoDay(new Date((acc.synced_to ? Date.parse(`${acc.synced_to}T00:00:00Z`) - OVERLAP_DAYS * DAY : Date.now() - 30 * DAY)));
+    if (from > to) from = to;
     try {
-      const { rows, dropped } = toImportRows(await c.getTransactions(acc.uid, from));
-      return { account: acc.account, from, rows: rows.slice(0, 5000), dropped };
+      const { rows, dropped } = toImportRows(await c.getTransactions(acc.uid, from, to));
+      return { account: acc.account, from, to, rows: rows.slice(0, 5000), dropped };
     } catch (err) { if (err instanceof BankError) return fail(req, reply, err); throw err; }
   });
 }

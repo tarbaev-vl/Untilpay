@@ -691,8 +691,8 @@ $('impSubmit').onclick = async () => {
   let res;
   const ok = await write(async () => {
     res = await api('POST', '/api/import/commit', { account: $('impAcc').value, items });
-    // remember that this bank account is reviewed up to today: the next sync starts shortly before this date
-    if (IMP.bank) await api('PUT', `/api/bank/accounts/${IMP.bank.id}`, { synced_to: today() }).catch(() => {});
+    // remember the reviewed range: "since the last sync" continues from it (the server moves it only forward, without gaps)
+    if (IMP.bank) await api('PUT', `/api/bank/accounts/${IMP.bank.id}`, { synced_from: IMP.bank.from, synced_to: IMP.bank.to }).catch(() => {});
     // if nothing was added to the current month, show the latest imported month
     const months = items.filter((i) => i.action === 'import').map((i) => periodOf(i.date, S.periodStart)).sort();
     if (months.length && !months.includes(S.month)) S.month = months.at(-1);
@@ -706,14 +706,35 @@ $('impSubmit').onclick = async () => {
 
 /* ---------- bank sync (Enable Banking) ---------- */
 // An alternative to a CSV file: rows come from the bank API and go through the same review list
-const BANK = { configured: false, error: null, connections: [], country: '' };
+const BANK = { configured: false, error: null, connections: [], country: '', custom: {} };
 const RENEW_DAYS = 14; // offer to renew the consent this many days before it expires
 const BANK_RESULTS = ['connected', 'denied', 'error'];
 const isoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-// The first sync starts at the current budget month; later ones a week before the last reviewed date
-function syncFrom(a) {
-  if (!a.synced_to) return periodRange(S.month, S.periodStart).from;
-  const d = new Date(`${a.synced_to}T12:00:00`); d.setDate(d.getDate() - 7); return isoLocal(d);
+const addDays = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return isoLocal(d); };
+const budgetMonthStart = () => periodRange(periodOf(today(), S.periodStart), S.periodStart).from;
+
+// Sync period: the choice is shared by all accounts and remembered in this browser
+const SYNC_PERIODS = ['since', 'day', 'week', 'month', 'custom'];
+const PERIOD_KEY = 'bank.period';
+let syncPeriod = 'since';
+try { const v = localStorage.getItem(PERIOD_KEY); if (SYNC_PERIODS.includes(v)) syncPeriod = v; } catch { /* storage unavailable */ }
+const saveSyncPeriod = (v) => { syncPeriod = v; try { localStorage.setItem(PERIOD_KEY, v); } catch { /* storage unavailable */ } };
+
+/** { from, to } for an account: "since" starts a week before the last reviewed date, the first time — at the budget month */
+function syncRange(a) {
+  const d = today();
+  switch (syncPeriod) {
+    case 'day': return { from: d, to: d };
+    case 'week': return { from: addDays(d, -6), to: d };
+    case 'month': return { from: budgetMonthStart(), to: d };
+    case 'custom': return BANK.custom[a.id] || (BANK.custom[a.id] = { from: budgetMonthStart(), to: d });
+    default: return { from: a.synced_to ? addDays(a.synced_to, -7) : budgetMonthStart(), to: d };
+  }
+}
+const validRange = (r) => Boolean(r.from && r.to && r.from <= r.to && r.to <= today());
+function rangeText({ from, to }) {
+  const f = (s) => new Date(`${s}T12:00:00`).toLocaleDateString(locale, { day: 'numeric', month: 'short' });
+  return from === to ? f(from) : `${f(from)} – ${f(to)}`;
 }
 async function loadBank() {
   try { Object.assign(BANK, await api('GET', '/api/bank')); }
@@ -738,14 +759,14 @@ async function connectBank(aspsp, country, btn) {
   try { const { url } = await api('POST', '/api/bank/connect', { aspsp, country }); window.location.href = url; }
   catch (err) { btn.disabled = false; if (err.status !== 401) $('bankHint').textContent = err.message || t('bank.result_error'); }
 }
-async function syncBank(conn, acc, from, btn) {
+async function syncBank(conn, acc, range, btn) {
   btn.disabled = true; $('bankHint').textContent = t('bank.loading');
   try {
-    const r = await api('GET', `/api/bank/transactions?account_id=${acc.id}${from ? `&from=${from}` : ''}`);
+    const r = await api('GET', `/api/bank/transactions?account_id=${acc.id}&from=${range.from}&to=${range.to}`);
     $('impFile').value = ''; $('impMap').hidden = true; $('bankHint').textContent = '';
     if (![...$('impAcc').options].some((o) => o.value === r.account)) $('impAcc').appendChild(Object.assign(el('option', null, label(r.account)), { value: r.account }));
     $('impAcc').value = r.account;
-    Object.assign(IMP, { table: null, format: null, bank: { id: acc.id, name: conn.aspsp_name, rows: r.rows, dropped: r.dropped } });
+    Object.assign(IMP, { table: null, format: null, bank: { id: acc.id, name: conn.aspsp_name, rows: r.rows, dropped: r.dropped, from: r.from, to: r.to } });
     await previewImport();
   } catch (err) {
     if (err.status !== 401) $('bankHint').textContent = err.message || t('bank.failed');
@@ -775,10 +796,30 @@ function renderBank() {
       const name = el('span', 'nm', [a.name, a.iban_tail ? `••${a.iban_tail}` : '', a.currency].filter(Boolean).join(' ') || c.aspsp_name);
       const sel = el('select', 'fld'); fillSelect(sel, [...new Set([...ACCS, a.account])], a.account); sel.setAttribute('aria-label', t('field.account'));
       sel.onchange = () => write(async () => { await api('PUT', `/api/bank/accounts/${a.id}`, { account: sel.value }); a.account = sel.value; });
-      const from = el('input', 'fld'); from.type = 'date'; from.value = syncFrom(a); from.title = t('bank.from'); from.setAttribute('aria-label', t('bank.from'));
-      const go = el('button', 'btn small', t('bank.sync')); go.type = 'button'; go.disabled = c.expired;
-      go.onclick = () => syncBank(c, a, from.value, go);
-      row.append(name, sel, from, go); L.appendChild(row);
+      // period: a ready-made range with its dates shown next to it, or two date fields for a custom one
+      const per = el('select', 'fld per'); per.setAttribute('aria-label', t('bank.period'));
+      SYNC_PERIODS.forEach((p) => { const o = el('option', null, t(`bank.p_${p}`)); o.value = p; per.appendChild(o); });
+      per.value = syncPeriod;
+      const rng = el('span', 'rng');
+      const custom = el('span', 'custom');
+      const dateField = (key, aria) => {
+        const i = el('input', 'fld'); i.type = 'date'; i.max = today(); i.setAttribute('aria-label', t(aria));
+        i.onchange = () => { syncRange(a)[key] = i.value; refresh(); }; return i;
+      };
+      const from = dateField('from', 'bank.date_from'), to = dateField('to', 'bank.date_to');
+      custom.append(from, el('span', 'dash', '–'), to);
+      const go = el('button', 'btn small', t('bank.sync')); go.type = 'button';
+      const refresh = () => {
+        const r = syncRange(a), ok = validRange(r);
+        custom.hidden = syncPeriod !== 'custom'; rng.hidden = !custom.hidden;
+        from.value = r.from; to.value = r.to; rng.textContent = rangeText(r);
+        go.disabled = c.expired || !ok; go.title = ok ? '' : t('bank.bad_range');
+      };
+      // the period is shared: changing it on one account updates all of them
+      per.onchange = () => { saveSyncPeriod(per.value); renderBank(); };
+      go.onclick = () => { const r = syncRange(a); if (validRange(r)) syncBank(c, a, { ...r }, go); };
+      refresh();
+      row.append(name, sel, per, rng, custom, go); L.appendChild(row);
     });
   });
 }

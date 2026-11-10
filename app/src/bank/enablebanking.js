@@ -10,7 +10,7 @@ const MAX_PAGES = 50;
 const LIMIT = 500; // the description in the database is up to 500 characters
 
 /**
- * Bank sync error. code: auth | redirect | expired | rate | conn | timeout | api.
+ * Bank sync error. code: auth | redirect | expired | rate | period | conn | timeout | api.
  * The user-facing text is built from code + params in the UI language (see routes/bank.js).
  */
 export class BankError extends Error {
@@ -33,6 +33,8 @@ export function signJwt(appId, privateKey, now = Math.floor(Date.now() / 1000)) 
 }
 
 const EXPIRED = new Set(['EXPIRED_SESSION', 'CLOSED_SESSION', 'REVOKED_SESSION', 'WRONG_SESSION_STATUS']);
+// the bank does not give transactions for the requested dates (too old history, a wrong interval)
+const PERIOD = new Set(['WRONG_TRANSACTIONS_PERIOD', 'WRONG_DATE_INTERVAL', 'DATE_FROM_IN_FUTURE', 'DATE_TO_WITHOUT_DATE_FROM']);
 
 export class EnableBanking {
   constructor({ appId, privateKey, redirectUrl, baseUrl = BASE_URL }) {
@@ -58,6 +60,7 @@ export class EnableBanking {
     if (res.ok) return data;
     const detail = String(data?.message || data?.error || '').slice(0, 200);
     if (EXPIRED.has(data?.error)) throw new BankError('expired', {}, res.status);
+    if (PERIOD.has(data?.error)) throw new BankError('period', { detail }, res.status);
     if (data?.error === 'REDIRECT_URI_NOT_ALLOWED') throw new BankError('redirect', { url: this.redirectUrl }, res.status);
     if (res.status === 429 || data?.error === 'ASPSP_RATE_LIMIT_EXCEEDED') throw new BankError('rate', {}, res.status);
     if (res.status === 401 || res.status === 403) throw new BankError('auth', { detail }, res.status);
@@ -87,12 +90,13 @@ export class EnableBanking {
 
   deleteSession(sessionId) { return this.request('DELETE', `/sessions/${encodeURIComponent(sessionId)}`); }
 
-  /** All transactions of an account since dateFrom ('YYYY-MM-DD'), following continuation keys */
-  async getTransactions(uid, dateFrom) {
+  /** All transactions of an account from dateFrom to dateTo inclusive ('YYYY-MM-DD'; no dateTo — up to now), following continuation keys */
+  async getTransactions(uid, dateFrom, dateTo) {
     const out = [];
     let key = null;
     for (let page = 0; page < MAX_PAGES; page++) {
       const qs = new URLSearchParams({ date_from: dateFrom });
+      if (dateTo) qs.set('date_to', dateTo);
       if (key) qs.set('continuation_key', key);
       const data = await this.request('GET', `/accounts/${encodeURIComponent(uid)}/transactions?${qs}`);
       out.push(...(data?.transactions || []));

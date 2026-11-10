@@ -39,4 +39,5 @@ export default {
   'bank.timeout': 'Cannot reach Enable Banking: timeout',
   'bank.api': 'Enable Banking error ({status}){detail}',
   'bank.not_found': 'Bank connection not found',
+  'bank.period': 'The bank does not return transactions for this period. Check the dates: the end cannot be in the future, and many banks give history older than 90 days only right after connecting{detail}',
 };

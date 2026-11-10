@@ -134,9 +134,9 @@ Error responses are `{ error: "<code>", message: "<text in the UI language>" }`.
 | GET | `/api/bank/aspsps?country=CY` | names of the banks available for connecting in a country |
 | POST | `/api/bank/connect` | `{ aspsp, country }` → `{ url }` — the bank page to send the browser to |
 | GET | `/api/bank/callback?code=…&state=…` | where the bank sends the browser back; authorised by the one-time `state`, redirects to `/?bank=connected` |
-| PUT | `/api/bank/accounts/:id` | `{ account }` — which app account the bank account maps to; `{ synced_to }` — reviewed up to this date |
+| PUT | `/api/bank/accounts/:id` | `{ account }` — which app account the bank account maps to; `{ synced_from, synced_to }` — the reviewed range (moves the last sync date only forward and only without a gap) |
 | DELETE | `/api/bank/connections/:id` | disconnect a bank |
-| GET | `/api/bank/transactions?account_id=…&from=…` | booked EUR transactions as rows for `/api/import/preview` |
+| GET | `/api/bank/transactions?account_id=…&from=…&to=…` | booked EUR transactions for the range (`to` inclusive, default today) as rows for `/api/import/preview` |
 | POST | `/api/import/commit` | `{ account, items: [{ …row, n, action: import/skip, note, category }] }` → `{ imported, skipped }` |
 
 ## Income
@@ -267,16 +267,23 @@ EB_REDIRECT_URL=http://localhost:8080/api/bank/callback   # exactly as registere
 
 **Use:** "Import CSV" → "From the bank". Choose the country and the bank, press "Connect bank",
 sign in at the bank and confirm access; you come back with the accounts listed. For each account
-choose which app account it belongs to and press "Sync": the transactions since the chosen date
-appear in the review list below. After an import the next sync starts a week before that day, and
-transactions already imported or hidden are recognised and not offered again.
+choose which app account it belongs to, pick a period and press "Sync": the transactions appear in
+the review list below. Transactions already imported or hidden are recognised and not offered again.
+
+Periods: **Since the last sync** (default: from a week before the last reviewed date, the first time
+from the start of the budget month), **Today**, **Week** (the last 7 days), **Budget month** (from the
+start of the current budget month, taking "Month starts on day N" into account) and **Custom dates**.
+The choice is remembered in the browser. The last sync date only moves forward and only when the
+reviewed range joins it, so loading just one day or an old range does not make "Since the last sync"
+skip anything.
 
 **Good to know**
 
 - The bank's consent expires (for most banks after up to 180 days). The panel shows the date and
   offers "Renew access" two weeks before; renewing keeps the account mapping.
 - Many banks give history older than 90 days only within the first hour after signing in.
-- Only booked EUR transactions are loaded; pending ones are skipped until the bank books them.
+- Only booked EUR transactions are loaded; pending ones are skipped until the bank books them, so
+  "Today" often returns little or nothing — many banks book card payments a day or two later.
 - Transactions imported earlier from a CSV file are not recognised as the same ones (the bank API
   words descriptions differently), so on the first sync uncheck them once — they are remembered as
   hidden. This is why the first sync starts at the current budget month by default.
