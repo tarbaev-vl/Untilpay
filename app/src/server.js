@@ -14,6 +14,7 @@ import settings from './routes/settings.js';
 import importRoutes from './routes/import.js';
 import incomes from './routes/incomes.js';
 import insights from './routes/insights.js';
+import bank from './routes/bank.js';
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -50,6 +51,7 @@ export async function build(opts = {}) {
   await app.register(importRoutes);
   await app.register(incomes);
   await app.register(insights);
+  await app.register(bank);
 
   app.get('/api/health', async () => {
     await pool.query('SELECT 1');

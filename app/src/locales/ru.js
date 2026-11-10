@@ -27,4 +27,16 @@ export default {
   'ai.refusal': '{provider} отказался анализировать эти данные',
   'ai.truncated': 'Ответ {provider} оборвался — попробуйте ещё раз',
   'ai.json': '{provider} вернул не JSON',
+
+  'bank.off': 'Синхронизация с банком не настроена: задайте EB_APP_ID, EB_PRIVATE_KEY_FILE и EB_REDIRECT_URL в .env и перезапустите контейнеры',
+  'bank.redirect_missing': 'Синхронизация с банком: в .env не задан EB_REDIRECT_URL',
+  'bank.key': 'Синхронизация с банком: не удалось прочитать файл приватного ключа {file}',
+  'bank.auth': 'Enable Banking не принял ключ или идентификатор приложения{detail}',
+  'bank.redirect': 'Адрес возврата {url} не разрешён для приложения Enable Banking: добавьте его в их панели управления',
+  'bank.expired': 'Доступ к банку истёк — подключите банк заново',
+  'bank.rate': 'Банк ограничивает частоту запросов, попробуйте через несколько часов',
+  'bank.conn': 'Нет связи с Enable Banking{detail}',
+  'bank.timeout': 'Нет связи с Enable Banking: таймаут',
+  'bank.api': 'Ошибка Enable Banking ({status}){detail}',
+  'bank.not_found': 'Подключение к банку не найдено',
 };

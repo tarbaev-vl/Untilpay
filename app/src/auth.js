@@ -43,8 +43,9 @@ export default async function auth(app) {
       return reply.code(401).send({ error: 'bad_password', message: req.t('auth.bad_password') });
     }
     const exp = Date.now() + TTL_DAYS * 864e5;
+    // Secure when forced in .env or when the request came over HTTPS (Cloudflare Tunnel, see nginx/default.conf)
     reply.setCookie(COOKIE, String(exp), {
-      signed: true, httpOnly: true, sameSite: 'strict', secure, path: '/',
+      signed: true, httpOnly: true, sameSite: 'strict', secure: secure || req.protocol === 'https', path: '/',
       maxAge: TTL_DAYS * 86400,
     });
     return { ok: true };

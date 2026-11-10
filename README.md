@@ -2,7 +2,8 @@
 
 Tracks recurring payments (rent, utilities, insurance, subscriptions) and day-to-day expenses.
 Yearly and quarterly payments are converted to a monthly amount; there is a breakdown by category,
-the balance left from income, a monthly CSV export and import of bank CSV statements.
+the balance left from income, a monthly CSV export, import of bank CSV statements and optional
+sync with the bank through Enable Banking.
 The month can start on any day (for example, on payday): starting on the 25th,
 "November" is 25 October – 24 November. This is set in the "Left" tile.
 
@@ -54,8 +55,36 @@ Do not expose port 8080 to the internet directly. Options:
 
 - **Home only:** leave it as it is and open it by the server IP on the local network.
 - **Tailscale:** the simplest way to reach it from a phone anywhere, without port forwarding.
-- **HTTPS domain:** put Caddy, Traefik or Cloudflare Tunnel in front of nginx and set
-  `COOKIE_SECURE=true` in `.env`.
+- **Cloudflare Tunnel** (built in, see below): a public HTTPS address on your own domain without
+  opening ports on the router.
+- **HTTPS domain:** put Caddy or Traefik in front of nginx and set `COOKIE_SECURE=true` in `.env`.
+
+### Cloudflare Tunnel
+
+Needs a free Cloudflare account and a domain whose DNS is managed by Cloudflare.
+
+1. **Set `APP_PASSWORD` in `.env` first.** Without it the budget is open to anyone who finds the address.
+2. Cloudflare dashboard → Zero Trust → Networks → Tunnels → *Create a tunnel* → *Cloudflared*.
+   Name it, then copy the token from the install command (the long string after `--token`).
+3. In the tunnel add a *Public hostname*: for example `budget.example.com`, service type **HTTP**,
+   URL **`web:81`** (port 81 is internal: only there nginx trusts the client IP sent by Cloudflare).
+4. In `.env`:
+
+```bash
+COMPOSE_PROFILES=tunnel
+CLOUDFLARE_TUNNEL_TOKEN=eyJh…
+```
+
+5. `docker compose up -d` and open `https://budget.example.com`.
+
+The tunnel container (`cloudflared`) only connects out to Cloudflare; no ports are opened. The local
+address `http://<server IP>:8080` keeps working. The session cookie gets the Secure flag automatically
+for requests through the tunnel. For bank sync use the public address in `EB_REDIRECT_URL` and in the
+Enable Banking application (`https://budget.example.com/api/bank/callback`, `…/privacy.html`,
+`…/terms.html`).
+
+Extra protection: Cloudflare Access (Zero Trust → Access → Applications) can require a one-time code
+by e-mail before the page is even shown.
 
 ## Language
 
@@ -101,6 +130,13 @@ Error responses are `{ error: "<code>", message: "<text in the UI language>" }`.
 | POST | `/api/insights` | `{ periods: [{ label, from, to }] }` — the current and up to 3 previous months → new advice |
 | GET / PUT | `/api/settings` | `{ "income": 3200, "periodStart": 25 }` — monthly income and the day the budget month starts on |
 | POST | `/api/import/preview` | `{ account, rows: [{ date, datetime, amount, original }] }` → rows with a `new / imported / skipped` status and a name and category suggested by the rules |
+| GET | `/api/bank` | whether bank sync is configured, connected banks with their accounts and consent expiry |
+| GET | `/api/bank/aspsps?country=CY` | names of the banks available for connecting in a country |
+| POST | `/api/bank/connect` | `{ aspsp, country }` → `{ url }` — the bank page to send the browser to |
+| GET | `/api/bank/callback?code=…&state=…` | where the bank sends the browser back; authorised by the one-time `state`, redirects to `/?bank=connected` |
+| PUT | `/api/bank/accounts/:id` | `{ account }` — which app account the bank account maps to; `{ synced_to }` — reviewed up to this date |
+| DELETE | `/api/bank/connections/:id` | disconnect a bank |
+| GET | `/api/bank/transactions?account_id=…&from=…` | booked EUR transactions as rows for `/api/import/preview` |
 | POST | `/api/import/commit` | `{ account, items: [{ …row, n, action: import/skip, note, category }] }` → `{ imported, skipped }` |
 
 ## Income
@@ -199,12 +235,60 @@ of a category; transfers between your own accounts can be unchecked — this is 
 - If you change the name or the category, this is remembered as a rule for the same bank description
   (without digits: card numbers and payment references) and filled in on later imports.
 
+## Bank sync
+
+An optional alternative to CSV files: transactions are read from the bank through
+[Enable Banking](https://enablebanking.com), a licensed open banking (PSD2) aggregator, and go
+through the same review list as a CSV import — you check, rename, pick categories and confirm.
+Nothing is imported without review and there is no background sync.
+
+Banks do not give individuals direct API access (it requires a payment provider licence), hence the
+aggregator. Enable Banking lets a private person use a production application with their own
+accounts only; check their current terms and pricing when you register.
+
+**Setup**
+
+1. Register at enablebanking.com and create a **production** application. Add the redirect URL
+   `<site address>/api/bank/callback` (for example `http://localhost:8080/api/bank/callback`; if
+   their control panel insists on HTTPS, use the address behind Caddy / Tailscale).
+   The form also asks for a privacy URL and a terms URL: the app serves both, `<site address>/privacy.html`
+   and `<site address>/terms.html` (edit `app/public/privacy.html` and `terms.html` to your liking).
+2. Save the private key they give you as `secrets/enablebanking.pem` next to `docker-compose.yml`
+   (the `secrets/` folder is in `.gitignore` and is mounted read-only into the app container).
+3. In their control panel press "Activate by linking accounts" and link the accounts you want to read.
+   The application only returns data for linked accounts.
+4. Set in `.env` and run `docker compose up -d --build`:
+
+```bash
+EB_APP_ID=<application id>
+EB_PRIVATE_KEY_FILE=/run/secrets/enablebanking.pem
+EB_REDIRECT_URL=http://localhost:8080/api/bank/callback   # exactly as registered
+```
+
+**Use:** "Import CSV" → "From the bank". Choose the country and the bank, press "Connect bank",
+sign in at the bank and confirm access; you come back with the accounts listed. For each account
+choose which app account it belongs to and press "Sync": the transactions since the chosen date
+appear in the review list below. After an import the next sync starts a week before that day, and
+transactions already imported or hidden are recognised and not offered again.
+
+**Good to know**
+
+- The bank's consent expires (for most banks after up to 180 days). The panel shows the date and
+  offers "Renew access" two weeks before; renewing keeps the account mapping.
+- Many banks give history older than 90 days only within the first hour after signing in.
+- Only booked EUR transactions are loaded; pending ones are skipped until the bank books them.
+- Transactions imported earlier from a CSV file are not recognised as the same ones (the bank API
+  words descriptions differently), so on the first sync uncheck them once — they are remembered as
+  hidden. This is why the first sync starts at the current budget month by default.
+- What is stored: the Enable Banking session id, the consent expiry, account names and the last 4
+  characters of the IBAN. Bank credentials never pass through this app.
+
 ## Structure
 
 ```
-docker-compose.yml
+docker-compose.yml         db, app, nginx; optional Cloudflare Tunnel (profile `tunnel`)
 .env.example
-nginx/default.conf         proxy, gzip, security headers (CSP)
+nginx/default.conf         proxy, gzip, security headers (CSP); port 81 for the tunnel
 app/
   Dockerfile
   package.json
@@ -214,12 +298,14 @@ app/
   migrations/004_for_month.sql  which month a recurring payment is for
   migrations/005_incomes.sql  income, import of credits, separate rules for expenses and income
   migrations/006_ai_insights.sql  saved AI advice
+  migrations/007_bank_sync.sql  bank connections and accounts for bank sync
   src/server.js            Fastify, running migrations
   src/auth.js              password sign-in, signed cookie
   src/i18n.js              language from the `lang` cookie, server messages
   src/locales/*.js         server messages by language
   src/routes/*.js          REST API with JSON Schema validation
   src/llm/*.js             LLM providers
+  src/bank/enablebanking.js  Enable Banking client (JWT, sessions, transactions)
   public/                  interface (HTML + CSS + JS, no build step)
   public/i18n.js           interface translation, number and date formats
   public/locales/*.js      interface strings by language
@@ -238,5 +324,5 @@ SESSION_SECRET=$(openssl rand -hex 32) APP_PASSWORD=dev npm run dev
 
 ## Ideas for later
 
-- Automatic scheduled sync with banks through Enable Banking (PSD2).
+- Scheduled background bank sync into a review queue.
 - Charts by month, category limits.

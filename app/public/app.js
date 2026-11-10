@@ -550,13 +550,14 @@ $('nextM').onclick = () => shiftMonth(1);
 
 /* ---------- CSV import ---------- */
 const FORMAT_ACC = { revolut: 'Revolut', boc: 'Bank of Cyprus' };
-const IMP = { table: null, format: null, items: [], dropped: null, showHidden: false, seq: 0 };
+// table — a parsed CSV file; bank — rows loaded from a bank account { id, name, rows, dropped }; only one of them is set
+const IMP = { table: null, format: null, bank: null, items: [], dropped: null, showHidden: false, seq: 0 };
 const visibleImport = () => IMP.items.filter((i) => i.status === 'new' || (i.status === 'skipped' && IMP.showHidden));
 
-function openImport() { $('importPanel').hidden = false; $('impFile').focus(); }
+function openImport() { $('importPanel').hidden = false; $('impFile').focus(); loadBank(); }
 function closeImport() {
   $('importPanel').hidden = true; $('impFile').value = ''; $('impShowHidden').checked = false; $('impHint').textContent = '';
-  Object.assign(IMP, { table: null, format: null, items: [], dropped: null, showHidden: false }); IMP.seq++;
+  Object.assign(IMP, { table: null, format: null, bank: null, items: [], dropped: null, showHidden: false }); IMP.seq++;
   $('impMap').hidden = true; $('impMeta').textContent = t('import.meta'); renderImport();
 }
 function fillCols(sel, headers, val, optional) {
@@ -568,10 +569,15 @@ function fillCols(sel, headers, val, optional) {
 const colMap = () => ({ date: +$('mDate').value, desc: +$('mDesc').value, amount: +$('mAmt').value, debit: +$('mDebit').value, credit: +$('mCredit').value, negSign: $('mNeg').checked });
 
 async function previewImport() {
-  const seq = ++IMP.seq; const m = colMap();
-  $('mNegWrap').hidden = !(m.debit < 0 && m.amount >= 0);
-  $('mCreditWrap').hidden = m.debit < 0; // the credit column only makes sense together with a debit column
-  const { rows, dropped } = toTransactions(IMP.table, IMP.format, m);
+  const seq = ++IMP.seq;
+  let src = IMP.bank; // rows from the bank are ready; a CSV table is converted with the chosen columns
+  if (!src) {
+    const m = colMap();
+    $('mNegWrap').hidden = !(m.debit < 0 && m.amount >= 0);
+    $('mCreditWrap').hidden = m.debit < 0; // the credit column only makes sense together with a debit column
+    src = toTransactions(IMP.table, IMP.format, m);
+  }
+  const { rows, dropped } = src;
   let items = []; $('impHint').textContent = '';
   if (rows.length) {
     try { items = await api('POST', '/api/import/preview', { account: $('impAcc').value, rows }); }
@@ -582,7 +588,8 @@ async function previewImport() {
   // for an income, category holds the source (free text); for an expense — a category from the list
   IMP.items = items.map((r) => ({ ...r, category: r.kind === 'income' || CATS.includes(r.category) ? r.category : OTHER, checked: r.status === 'new' }))
     .sort((a, b) => (b.datetime || b.date).localeCompare(a.datetime || a.date));
-  $('impMeta').textContent = t('import.format', { name: FORMAT_ACC[IMP.format] || t('import.format_custom') });
+  $('impMeta').textContent = IMP.bank ? t('bank.source', { name: IMP.bank.name })
+    : t('import.format', { name: FORMAT_ACC[IMP.format] || t('import.format_custom') });
   renderImport();
 }
 
@@ -622,7 +629,8 @@ function renderImport() {
   const L = $('impList'); L.innerHTML = '';
   const its = IMP.items; const cnt = (st) => its.filter((i) => i.status === st).length;
   const nNew = cnt('new'), nImp = cnt('imported'), nHid = cnt('skipped'), d = IMP.dropped || {};
-  $('impTools').hidden = !IMP.table;
+  const loaded = Boolean(IMP.table || IMP.bank);
+  $('impTools').hidden = !loaded;
   const nInc = its.filter((i) => i.status === 'new' && i.kind === 'income').length;
   const parts = [nInc ? t('import.sum_new_inc', { n: nNew, inc: nInc }) : t('import.sum_new', { n: nNew })];
   [[nImp, 'imported'], [nHid, 'hidden'], [d.pending, 'pending'], [d.currency, 'currency'],
@@ -630,9 +638,9 @@ function renderImport() {
   $('impSummary').textContent = parts.join(' · ');
   $('impHiddenWrap').hidden = !nHid;
   const vis = visibleImport();
-  if (IMP.table && !vis.length) {
+  if (loaded && !vis.length) {
     L.appendChild(el('div', 'empty', its.length ? t('import.none_new')
-      : `${t('import.none_found')}${IMP.format === 'revolut' ? '' : ` ${t('import.check_columns')}`}`));
+      : `${t('import.none_found')}${IMP.bank || IMP.format === 'revolut' ? '' : ` ${t('import.check_columns')}`}`));
   }
   vis.forEach((it) => L.appendChild(importRow(it)));
   updateImportBtn();
@@ -652,7 +660,7 @@ $('impFile').addEventListener('change', async () => {
   const f = $('impFile').files[0]; if (!f) return;
   const table = parseCsv(await f.text());
   if (!table.rows.length) { closeImport(); openImport(); $('impHint').textContent = t('import.no_rows'); return; }
-  IMP.table = table; IMP.format = detectFormat(table.headers);
+  IMP.bank = null; IMP.table = table; IMP.format = detectFormat(table.headers);
   if (FORMAT_ACC[IMP.format]) $('impAcc').value = FORMAT_ACC[IMP.format];
   $('impMap').hidden = IMP.format === 'revolut';
   if (IMP.format !== 'revolut') {
@@ -667,7 +675,7 @@ $('impFile').addEventListener('change', async () => {
 // a signed amount and a separate debit column are mutually exclusive
 $('mAmt').addEventListener('change', () => { if (+$('mAmt').value >= 0) { $('mDebit').value = '-1'; $('mNeg').checked = hasNegatives(IMP.table.rows, +$('mAmt').value); } });
 $('mDebit').addEventListener('change', () => { if (+$('mDebit').value >= 0) $('mAmt').value = '-1'; });
-['mDate', 'mDesc', 'mAmt', 'mDebit', 'mCredit', 'mNeg', 'impAcc'].forEach((id) => $(id).addEventListener('change', () => { if (IMP.table) previewImport(); }));
+['mDate', 'mDesc', 'mAmt', 'mDebit', 'mCredit', 'mNeg', 'impAcc'].forEach((id) => $(id).addEventListener('change', () => { if (IMP.table || IMP.bank) previewImport(); }));
 $('impShowHidden').onchange = () => { IMP.showHidden = $('impShowHidden').checked; renderImport(); };
 const markAll = (v) => { visibleImport().forEach((i) => { i.checked = v; }); renderImport(); };
 $('impAll').onclick = () => markAll(true);
@@ -683,6 +691,8 @@ $('impSubmit').onclick = async () => {
   let res;
   const ok = await write(async () => {
     res = await api('POST', '/api/import/commit', { account: $('impAcc').value, items });
+    // remember that this bank account is reviewed up to today: the next sync starts shortly before this date
+    if (IMP.bank) await api('PUT', `/api/bank/accounts/${IMP.bank.id}`, { synced_to: today() }).catch(() => {});
     // if nothing was added to the current month, show the latest imported month
     const months = items.filter((i) => i.action === 'import').map((i) => periodOf(i.date, S.periodStart)).sort();
     if (months.length && !months.includes(S.month)) S.month = months.at(-1);
@@ -693,6 +703,94 @@ $('impSubmit').onclick = async () => {
     closeImport();
   } else updateImportBtn();
 };
+
+/* ---------- bank sync (Enable Banking) ---------- */
+// An alternative to a CSV file: rows come from the bank API and go through the same review list
+const BANK = { configured: false, error: null, connections: [], country: '' };
+const RENEW_DAYS = 14; // offer to renew the consent this many days before it expires
+const BANK_RESULTS = ['connected', 'denied', 'error'];
+const isoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+// The first sync starts at the current budget month; later ones a week before the last reviewed date
+function syncFrom(a) {
+  if (!a.synced_to) return periodRange(S.month, S.periodStart).from;
+  const d = new Date(`${a.synced_to}T12:00:00`); d.setDate(d.getDate() - 7); return isoLocal(d);
+}
+async function loadBank() {
+  try { Object.assign(BANK, await api('GET', '/api/bank')); }
+  catch (err) { if (err.status === 401) return; BANK.error = err.message; }
+  renderBank();
+  if (BANK.configured && BANK.country !== $('bankCountry').value.trim().toUpperCase()) loadAspsps();
+}
+async function loadAspsps() {
+  const cc = $('bankCountry').value.trim().toUpperCase(); const sel = $('bankAspsp');
+  sel.innerHTML = ''; $('bankConnectBtn').disabled = true;
+  if (!/^[A-Z]{2}$/.test(cc)) return;
+  try {
+    const list = await api('GET', `/api/bank/aspsps?country=${cc}`);
+    if ($('bankCountry').value.trim().toUpperCase() !== cc) return; // the country was changed meanwhile
+    BANK.country = cc;
+    list.forEach((name) => { const o = el('option', null, name); o.value = name; sel.appendChild(o); });
+    $('bankConnectBtn').disabled = !list.length;
+  } catch (err) { if (err.status !== 401) $('bankHint').textContent = err.message || t('bank.failed'); }
+}
+async function connectBank(aspsp, country, btn) {
+  btn.disabled = true; $('bankHint').textContent = t('bank.redirecting');
+  try { const { url } = await api('POST', '/api/bank/connect', { aspsp, country }); window.location.href = url; }
+  catch (err) { btn.disabled = false; if (err.status !== 401) $('bankHint').textContent = err.message || t('bank.result_error'); }
+}
+async function syncBank(conn, acc, from, btn) {
+  btn.disabled = true; $('bankHint').textContent = t('bank.loading');
+  try {
+    const r = await api('GET', `/api/bank/transactions?account_id=${acc.id}${from ? `&from=${from}` : ''}`);
+    $('impFile').value = ''; $('impMap').hidden = true; $('bankHint').textContent = '';
+    if (![...$('impAcc').options].some((o) => o.value === r.account)) $('impAcc').appendChild(Object.assign(el('option', null, label(r.account)), { value: r.account }));
+    $('impAcc').value = r.account;
+    Object.assign(IMP, { table: null, format: null, bank: { id: acc.id, name: conn.aspsp_name, rows: r.rows, dropped: r.dropped } });
+    await previewImport();
+  } catch (err) {
+    if (err.status !== 401) $('bankHint').textContent = err.message || t('bank.failed');
+    if (err.status === 409) loadBank(); // the consent has expired: show it
+  }
+  btn.disabled = false;
+}
+function renderBank() {
+  const L = $('bankList'); L.innerHTML = '';
+  $('bankConnect').hidden = !BANK.configured;
+  $('bankHint').textContent = BANK.error || (BANK.configured ? '' : t('bank.setup'));
+  BANK.connections.forEach((c) => {
+    const left = c.expired ? 0 : Math.ceil((new Date(c.valid_until) - Date.now()) / 864e5);
+    const soon = c.expired || left <= RENEW_DAYS;
+    const head = el('div', 'bank-h');
+    head.append(el('b', null, c.aspsp_name), el('span', `meta${soon ? ' warn' : ''}`, c.expired ? t('bank.expired')
+      : t('bank.valid_until', { date: new Date(c.valid_until).toLocaleDateString(locale, { day: 'numeric', month: 'long', year: 'numeric' }) })));
+    if (soon) {
+      const renew = el('button', 'op', t('bank.renew')); renew.type = 'button';
+      renew.onclick = () => connectBank(c.aspsp_name, c.aspsp_country, renew); head.appendChild(renew);
+    }
+    const off = el('button', 'op', t('bank.disconnect')); off.type = 'button';
+    off.onclick = () => confirmBtn(off, () => write(async () => { await api('DELETE', `/api/bank/connections/${c.id}`); await loadBank(); }));
+    head.appendChild(off); L.appendChild(head);
+    c.accounts.forEach((a) => {
+      const row = el('div', 'bank-row');
+      const name = el('span', 'nm', [a.name, a.iban_tail ? `••${a.iban_tail}` : '', a.currency].filter(Boolean).join(' ') || c.aspsp_name);
+      const sel = el('select', 'fld'); fillSelect(sel, [...new Set([...ACCS, a.account])], a.account); sel.setAttribute('aria-label', t('field.account'));
+      sel.onchange = () => write(async () => { await api('PUT', `/api/bank/accounts/${a.id}`, { account: sel.value }); a.account = sel.value; });
+      const from = el('input', 'fld'); from.type = 'date'; from.value = syncFrom(a); from.title = t('bank.from'); from.setAttribute('aria-label', t('bank.from'));
+      const go = el('button', 'btn small', t('bank.sync')); go.type = 'button'; go.disabled = c.expired;
+      go.onclick = () => syncBank(c, a, from.value, go);
+      row.append(name, sel, from, go); L.appendChild(row);
+    });
+  });
+}
+$('bankCountry').addEventListener('change', loadAspsps);
+$('bankConnectBtn').onclick = () => { if ($('bankAspsp').value) connectBank($('bankAspsp').value, BANK.country, $('bankConnectBtn')); };
+// Back from the bank: /api/bank/callback redirects to /?bank=connected|denied|error
+function bankReturn() {
+  const result = new URLSearchParams(window.location.search).get('bank');
+  if (!BANK_RESULTS.includes(result)) return;
+  window.history.replaceState(null, '', window.location.pathname);
+  openImport(); toast(t(`bank.result_${result}`));
+}
 
 /* ---------- sign-in ---------- */
 function showLogin() { $('appView').hidden = true; $('loginView').hidden = false; $('pw').focus(); }
@@ -720,6 +818,6 @@ $('eDate').value = today(); $('iDate').value = today();
   try {
     const me = await api('GET', '/api/me');
     if (!me.authed) { showLogin(); return; }
-    showApp(me.passwordRequired); render(); loadAll();
+    showApp(me.passwordRequired); render(); loadAll(); bankReturn();
   } catch { showApp(false); const b = $('banner'); b.hidden = false; b.textContent = t('banner.server_down'); }
 })();

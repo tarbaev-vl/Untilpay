@@ -32,6 +32,13 @@ services:
       LLM_KEY: ${LLM_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
       LLM_BASE_URL: ${LLM_BASE_URL:-}
+      # Bank sync through Enable Banking (see README → Bank sync); empty EB_APP_ID — bank sync is off
+      EB_APP_ID: ${EB_APP_ID:-}
+      EB_PRIVATE_KEY_FILE: ${EB_PRIVATE_KEY_FILE:-/run/secrets/enablebanking.pem}
+      EB_REDIRECT_URL: ${EB_REDIRECT_URL:-}
+    volumes:
+      # the Enable Banking private key lives here, outside the repository
+      - ./secrets:/run/secrets:ro
     extra_hosts:
       # lets the container reach Ollama running on the host (LLM_PROVIDER=ollama)
       - "host.docker.internal:host-gateway"
@@ -45,6 +52,20 @@ services:
       - "${HTTP_PORT:-8080}:80"
     volumes:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+
+  # Cloudflare Tunnel: access from the internet over HTTPS without opening ports (see README → Access from outside).
+  # Off by default; turn on with COMPOSE_PROFILES=tunnel and CLOUDFLARE_TUNNEL_TOKEN in .env.
+  # In the Cloudflare dashboard point the tunnel's public hostname to http://web:81
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.7
+    profiles: ["tunnel"]
+    restart: unless-stopped
+    depends_on:
+      - web
+    command: tunnel --no-autoupdate run
+    environment:
+      # the token is read from the environment so that it does not show up in the process list
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
 
 volumes:
   pgdata:

@@ -116,6 +116,26 @@ label.f input,label.f select{text-transform:none;letter-spacing:0;font-weight:50
 img{max-width:100%}
 .top-actions{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 .btn.small{padding:6px 10px;font-size:.85rem;font-weight:600}
+/* bank sync */
+.bank{display:flex;flex-direction:column;gap:8px;padding-bottom:12px;margin-bottom:4px;border-bottom:1px solid var(--line)}
+.bank-list{display:flex;flex-direction:column;gap:6px}
+.bank-list:empty{display:none}
+.bank-h{display:flex;flex-wrap:wrap;gap:4px 12px;align-items:baseline;margin-top:4px}
+.bank-h .meta{font-size:.82rem;color:var(--muted);margin-right:auto}
+.bank-h .meta.warn{color:var(--bad)}
+.bank-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.bank-row .nm{flex:2 1 160px;min-width:0;font-size:.9rem}
+.bank-row .fld{flex:1 1 130px;min-width:0;background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:6px 8px}
+.bank .hint{font-size:.82rem;color:var(--muted)}
+.bank .hint:empty{display:none}
+.row>.bank-cc{flex:0 1 90px}
+.row>.bank-btn{flex:none;align-self:flex-end}
+/* plain text pages: privacy.html, terms.html */
+.doc{max-width:680px;margin:0 auto;padding:40px 16px 60px;line-height:1.55}
+.doc h1{margin:.2em 0 .8em}
+.doc h2{font-size:1.05rem;margin:1.6em 0 .3em}
+.doc p{margin:.5em 0;color:var(--fg)}
+.doc a{color:var(--accent)}
 /* language switch */
 .seg.lang{flex:none;align-self:center}
 .seg.lang button{flex:none;padding:5px 9px;font-size:.78rem;letter-spacing:.04em}

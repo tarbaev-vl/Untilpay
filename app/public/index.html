@@ -49,6 +49,17 @@
   <section class="panel" id="importPanel" aria-labelledby="impH" hidden>
     <div class="panel-h"><h2 id="impH" data-i18n="import.title">Import from a CSV statement</h2><span class="meta" id="impMeta" data-i18n="import.meta">Revolut, Bank of Cyprus or any CSV</span></div>
     <div class="add">
+      <!-- Bank sync through Enable Banking: an alternative to a CSV file, uses the same review list below -->
+      <div class="bank" id="bankBox">
+        <div class="eyebrow" data-i18n="bank.title">From the bank</div>
+        <div class="bank-list" id="bankList"></div>
+        <div class="row" id="bankConnect" hidden>
+          <label class="f bank-cc" for="bankCountry"><span data-i18n="bank.country">Country</span><input id="bankCountry" maxlength="2" value="CY" autocomplete="off"></label>
+          <label class="f grow" for="bankAspsp"><span data-i18n="bank.bank">Bank</span><select id="bankAspsp"></select></label>
+          <button type="button" class="btn ghost bank-btn" id="bankConnectBtn" data-i18n="bank.connect" disabled>Connect bank</button>
+        </div>
+        <div class="hint" id="bankHint" role="status"></div>
+      </div>
       <div class="row">
         <label class="f grow" for="impFile"><span data-i18n="import.file">Statement file</span><input id="impFile" type="file" accept=".csv,text/csv,text/plain"></label>
         <label class="f" for="impAcc"><span data-i18n="field.account">Account</span><select id="impAcc"></select></label>
