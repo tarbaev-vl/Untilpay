@@ -53,7 +53,7 @@ async function loadExp() {
   S.exp = exp; S.inc = inc;
   await loadInsights();
 }
-const aiStatus = (r) => ({ configured: r.configured, provider: r.provider, model: r.model, local: r.local, cfgError: r.error });
+const aiStatus = (r) => ({ configured: r.configured, provider: r.provider, local: r.local, cfgError: r.error });
 // Saved AI advice for the current period; an error here must not break loading the expenses
 async function loadInsights() {
   const { from, to } = periodRange(S.month, S.periodStart);
@@ -198,8 +198,7 @@ function renderInsights() {
   $('aiRun').textContent = t(busy ? 'ai.busy' : saved ? 'ai.refresh' : 'ai.get');
   const when = (opts) => new Date(saved.created_at).toLocaleString(locale, opts);
   if (open) {
-    $('aiMeta').textContent = saved ? `${t('ai.updated', { when: when({ day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) })} · ${saved.model}`
-      : provider ? `${provider} · ${S.ai.model}` : '';
+    $('aiMeta').textContent = saved ? t('ai.updated', { when: when({ day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) }) : '';
   } else if (!configured) $('aiMeta').textContent = t('ai.not_configured');
   else if (busy) $('aiMeta').textContent = '';
   else if (!saved) $('aiMeta').textContent = t('ai.never');
