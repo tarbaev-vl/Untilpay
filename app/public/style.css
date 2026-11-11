@@ -230,3 +230,8 @@ button.cat:hover{background:var(--sunk)}
 .ai-toggle[aria-expanded="true"] .chev{transform:rotate(90deg)}
 @media (prefers-reduced-motion:no-preference){.ai-toggle .chev{transition:transform .2s ease}}
 #aiPanel.collapsed .panel-h{border-bottom:0}
+/* drop-down lists: own arrow with room from the edge (the native one sits right at the border); colour follows the theme */
+#appView label.f select,#appView select.fld{-webkit-appearance:none;appearance:none;padding-right:32px;
+  background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);
+  background-position:calc(100% - 17px) 55%,calc(100% - 12px) 55%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;
+  text-overflow:ellipsis}

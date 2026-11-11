@@ -753,17 +753,18 @@ const isoLocal = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.get
 const addDays = (iso, n) => { const d = new Date(`${iso}T12:00:00`); d.setDate(d.getDate() + n); return isoLocal(d); };
 const budgetMonthStart = () => periodRange(periodOf(today(), S.periodStart), S.periodStart).from;
 
-// Sync period: the choice is shared by all accounts and remembered in this browser
+// Sync period: chosen per bank account and remembered in this browser ({ accountId: period })
 const SYNC_PERIODS = ['since', 'day', 'week', 'month', 'custom'];
-const PERIOD_KEY = 'bank.period';
-let syncPeriod = 'since';
-try { const v = localStorage.getItem(PERIOD_KEY); if (SYNC_PERIODS.includes(v)) syncPeriod = v; } catch { /* storage unavailable */ }
-const saveSyncPeriod = (v) => { syncPeriod = v; try { localStorage.setItem(PERIOD_KEY, v); } catch { /* storage unavailable */ } };
+const PERIOD_KEY = 'bank.periods';
+let syncPeriods = {};
+try { const v = JSON.parse(localStorage.getItem(PERIOD_KEY) || '{}'); if (v && typeof v === 'object') syncPeriods = v; } catch { /* storage unavailable or broken */ }
+const periodOfAccount = (a) => (SYNC_PERIODS.includes(syncPeriods[a.id]) ? syncPeriods[a.id] : 'since');
+const saveSyncPeriod = (a, v) => { syncPeriods[a.id] = v; try { localStorage.setItem(PERIOD_KEY, JSON.stringify(syncPeriods)); } catch { /* storage unavailable */ } };
 
 /** { from, to } for an account: "since" starts a week before the last reviewed date, the first time — at the budget month */
 function syncRange(a) {
   const d = today();
-  switch (syncPeriod) {
+  switch (periodOfAccount(a)) {
     case 'day': return { from: d, to: d };
     case 'week': return { from: addDays(d, -6), to: d };
     case 'month': return { from: budgetMonthStart(), to: d };
@@ -838,7 +839,7 @@ function renderBank() {
       // period: a ready-made range with its dates shown next to it, or two date fields for a custom one
       const per = el('select', 'fld per'); per.setAttribute('aria-label', t('bank.period'));
       SYNC_PERIODS.forEach((p) => { const o = el('option', null, t(`bank.p_${p}`)); o.value = p; per.appendChild(o); });
-      per.value = syncPeriod;
+      per.value = periodOfAccount(a);
       const rng = el('span', 'rng');
       const custom = el('span', 'custom');
       const dateField = (key, aria) => {
@@ -850,12 +851,11 @@ function renderBank() {
       const go = el('button', 'btn small', t('bank.sync')); go.type = 'button';
       const refresh = () => {
         const r = syncRange(a), ok = validRange(r);
-        custom.hidden = syncPeriod !== 'custom'; rng.hidden = !custom.hidden;
+        custom.hidden = periodOfAccount(a) !== 'custom'; rng.hidden = !custom.hidden;
         from.value = r.from; to.value = r.to; rng.textContent = rangeText(r);
         go.disabled = c.expired || !ok; go.title = ok ? '' : t('bank.bad_range');
       };
-      // the period is shared: changing it on one account updates all of them
-      per.onchange = () => { saveSyncPeriod(per.value); renderBank(); };
+      per.onchange = () => { saveSyncPeriod(a, per.value); refresh(); };
       go.onclick = () => { const r = syncRange(a); if (validRange(r)) syncBank(c, a, { ...r }, go); };
       refresh();
       row.append(name, per, rng, custom, go); L.appendChild(row);
