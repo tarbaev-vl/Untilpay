@@ -3,3 +3,5 @@ node_modules/
 *.sql.gz
 secrets/
 plans/
+.idea/
+.junie/

@@ -334,3 +334,7 @@ SESSION_SECRET=$(openssl rand -hex 32) APP_PASSWORD=dev npm run dev
 
 - Scheduled background bank sync into a review queue.
 - Charts by month, category limits.
+
+## License
+
+[MIT](LICENSE)
