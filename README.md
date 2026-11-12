@@ -1,6 +1,6 @@
-# Home Budget (self-hosted)
+# Untilpay (self-hosted)
 
-Tracks recurring payments (rent, utilities, insurance, subscriptions) and day-to-day expenses.
+Untilpay ("until payday") is a self-hosted home budget. It tracks recurring payments (rent, utilities, insurance, subscriptions) and day-to-day expenses.
 Yearly and quarterly payments are converted to a monthly amount; there is a breakdown by category,
 the balance left from income, a monthly CSV export, import of bank CSV statements and optional
 sync with the bank through Enable Banking.
@@ -66,7 +66,7 @@ Needs a free Cloudflare account and a domain whose DNS is managed by Cloudflare.
 1. **Set `APP_PASSWORD` in `.env` first.** Without it the budget is open to anyone who finds the address.
 2. Cloudflare dashboard → Zero Trust → Networks → Tunnels → *Create a tunnel* → *Cloudflared*.
    Name it, then copy the token from the install command (the long string after `--token`).
-3. In the tunnel add a *Public hostname*: for example `budget.example.com`, service type **HTTP**,
+3. In the tunnel add a *Public hostname*: for example `untilpay.example.com`, service type **HTTP**,
    URL **`web:81`** (port 81 is internal: only there nginx trusts the client IP sent by Cloudflare).
 4. In `.env`:
 
@@ -75,12 +75,12 @@ COMPOSE_PROFILES=tunnel
 CLOUDFLARE_TUNNEL_TOKEN=eyJh…
 ```
 
-5. `docker compose up -d` and open `https://budget.example.com`.
+5. `docker compose up -d` and open `https://untilpay.example.com`.
 
 The tunnel container (`cloudflared`) only connects out to Cloudflare; no ports are opened. The local
 address `http://<server IP>:8080` keeps working. The session cookie gets the Secure flag automatically
 for requests through the tunnel. For bank sync use the public address in `EB_REDIRECT_URL` and in the
-Enable Banking application (`https://budget.example.com/api/bank/callback`, `…/privacy.html`,
+Enable Banking application (`https://untilpay.example.com/api/bank/callback`, `…/privacy.html`,
 `…/terms.html`).
 
 Extra protection: Cloudflare Access (Zero Trust → Access → Applications) can require a one-time code

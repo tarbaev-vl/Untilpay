@@ -1,8 +1,8 @@
 {
-  "name": "budget-app",
+  "name": "untilpay",
   "version": "1.0.0",
   "private": true,
-  "description": "Self-hosted home budget: recurring payments, expenses, categories",
+  "description": "Untilpay — self-hosted home budget: recurring payments, expenses, categories",
   "type": "module",
   "main": "src/server.js",
   "engines": {

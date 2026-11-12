@@ -1,6 +1,6 @@
 // Russian UI strings. Keys must match ./en.js (except `val.*`: stored values are already Russian)
 export default {
-  'app.title': 'Семейный бюджет',
+  'app.title': 'Untilpay',
   'app.eyebrow': 'Бюджет · EUR',
   'lang.label': 'Язык',
 

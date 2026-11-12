@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <!-- Home Budget: a donut chart of spending split on the accent colour -->
+  <!-- Untilpay: a donut chart of spending split on the accent colour -->
   <rect width="64" height="64" rx="14" fill="#0B6E7C"/>
   <g fill="none" stroke-width="10" transform="rotate(-90 32 32)">
     <circle cx="32" cy="32" r="17" stroke="#FFFFFF" stroke-dasharray="48.9 57.91"/>

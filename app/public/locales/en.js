@@ -1,6 +1,6 @@
 // English UI strings. Keys must match ./ru.js (except `val.*`, see below)
 export default {
-  'app.title': 'Home Budget',
+  'app.title': 'Untilpay',
   'app.eyebrow': 'Budget · EUR',
   'lang.label': 'Language',
 

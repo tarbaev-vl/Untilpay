@@ -1,6 +1,6 @@
 import { timingSafeEqual, createHash } from 'node:crypto';
 
-const COOKIE = 'budget_session';
+const COOKIE = 'untilpay_session';
 const TTL_DAYS = Number(process.env.SESSION_DAYS || 30);
 
 const sha = (s) => createHash('sha256').update(String(s)).digest();
